@@ -17,3 +17,14 @@
 
 ## Build reqs
 - build as if you there are other agents working on this project. Clear plans, clear progress markers and well documented changes and commits.
+
+## Progress
+- [x] Basic game loop and mechanics (lives, crumbs, traps, gems, cat, timer)
+- [x] 3D Renderer setup with lighting and shadows
+- [x] Background music added and looping correctly
+- [x] Playtesting UI included for quick debugging and testing
+- [x] Level 1: Cheese Wedge shaped maze implemented
+- [x] Level 2: Sweetheart (heart-shaped) maze implemented
+- [x] Level 3: Midnight Octagon maze implemented
+- [x] Implemented Web Audio API for interactive SFX (pickups, damage, teleports)
+- [x] Added visual "juice" (camera shake on damage, hover animations for pickups, waddle animations for characters)
