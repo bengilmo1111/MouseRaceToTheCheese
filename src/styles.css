@@ -121,6 +121,23 @@ input {
   text-align: right;
 }
 
+.guide-pill {
+  min-width: 220px;
+  text-align: center;
+  color: #6e4618;
+}
+
+.cat-pill {
+  min-width: 180px;
+  text-align: center;
+}
+
+.cat-pill.alert {
+  background: rgba(255, 227, 214, 0.96);
+  color: #9b371c;
+  border-color: rgba(155, 55, 28, 0.18);
+}
+
 #timer-label {
   padding: 6px 12px 0;
   font-size: 13px;
