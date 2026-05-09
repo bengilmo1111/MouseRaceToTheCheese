@@ -485,19 +485,8 @@ export class MouseRace3D {
         }
 
         if (cell === "G") {
-          const gem = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.36, 0),
-            new THREE.MeshStandardMaterial({
-              color: level.theme.accent,
-              emissive: level.theme.accent,
-              emissiveIntensity: 0.55,
-              roughness: 0.2,
-              metalness: 0.2,
-            }),
-          );
-          gem.position.set(x, 0.55, z);
-          gem.castShadow = true;
-          gem.add(this.createWorldMarker("ZIP", level.theme.accent, 0xffffff, 1.05));
+          const gem = this.buildGem(level.theme.accent);
+          gem.position.set(x, 0.6, z);
           group.add(gem);
           gems.push({ mesh: gem, position: gem.position.clone(), active: true });
           return;
@@ -896,6 +885,80 @@ export class MouseRace3D {
     return group;
   }
 
+  private buildGem(accentColor: number): THREE.Group {
+    const group = new THREE.Group();
+
+    const hull = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.42, 0),
+      new THREE.MeshStandardMaterial({
+        color: accentColor,
+        emissive: accentColor,
+        emissiveIntensity: 0.55,
+        roughness: 0.06,
+        metalness: 0.55,
+        transparent: true,
+        opacity: 0.78,
+        flatShading: true,
+      }),
+    );
+    hull.scale.set(0.78, 1.45, 0.78);
+    hull.castShadow = true;
+    group.add(hull);
+
+    const facetEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(hull.geometry),
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }),
+    );
+    facetEdges.scale.copy(hull.scale);
+    group.add(facetEdges);
+
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.16, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    );
+    core.scale.set(0.95, 1.35, 0.95);
+    group.add(core);
+
+    const orbit = new THREE.Mesh(
+      new THREE.TorusGeometry(0.46, 0.022, 8, 36),
+      new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.7,
+      }),
+    );
+    orbit.rotation.x = Math.PI / 2.4;
+    group.add(orbit);
+
+    const orbit2 = new THREE.Mesh(
+      new THREE.TorusGeometry(0.5, 0.014, 8, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.45,
+      }),
+    );
+    orbit2.rotation.x = Math.PI / 1.8;
+    orbit2.rotation.z = Math.PI / 6;
+    group.add(orbit2);
+
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(0.24, 0.95, 36),
+      new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = -0.55;
+    group.add(halo);
+
+    return group;
+  }
+
   private buildMouseTrap(): THREE.Group {
     const group = new THREE.Group();
     const woodMat = new THREE.MeshStandardMaterial({ color: 0xc28a4a, roughness: 0.82 });
@@ -1286,7 +1349,7 @@ export class MouseRace3D {
     for (const gem of this.maze.gems) {
       if (!gem.active) continue;
       gem.mesh.rotation.y += 0.04;
-      gem.mesh.position.y = 0.55 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.08;
+      gem.mesh.position.y = 0.6 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.1;
       if (this.player.position.distanceToSquared(gem.position) < 0.95 * 0.95) {
         this.teleportFromGem(gem);
       }
