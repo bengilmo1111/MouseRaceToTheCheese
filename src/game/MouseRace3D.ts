@@ -27,7 +27,6 @@ type MazeState = {
   crumbs: MazePickup[];
   traps: MazeHazard[];
   gems: MazePickup[];
-  pathMarkers: THREE.Mesh[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
   startPoint: THREE.Vector3;
@@ -47,7 +46,7 @@ export class MouseRace3D {
   private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly clock = new THREE.Clock();
-  private readonly tileSize = 2.6;
+  private readonly tileSize = 3.9;
   private readonly moveSpeed = 6.0;
   private readonly accel = 18;
   private readonly decel = 12;
@@ -351,7 +350,6 @@ export class MouseRace3D {
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
     const gems: MazePickup[] = [];
-    const pathMarkers: THREE.Mesh[] = [];
     const patrol: THREE.Vector3[] = [];
 
     const rows = level.map.length;
@@ -400,39 +398,35 @@ export class MouseRace3D {
         }
 
         if (cell === ".") {
+          const crumbGeom = new THREE.IcosahedronGeometry(0.18, 0);
+          const posAttr = crumbGeom.getAttribute("position") as THREE.BufferAttribute;
+          for (let v = 0; v < posAttr.count; v += 1) {
+            const jitter = 0.55 + Math.random() * 0.6;
+            posAttr.setXYZ(v, posAttr.getX(v) * jitter, posAttr.getY(v) * (0.5 + Math.random() * 0.6), posAttr.getZ(v) * jitter);
+          }
+          crumbGeom.computeVertexNormals();
           const crumbMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.16, 12, 12),
+            crumbGeom,
             new THREE.MeshStandardMaterial({
-              color: 0xffef91,
-              emissive: 0xffc84e,
-              emissiveIntensity: 0.6,
+              color: 0xf2d27a,
+              emissive: 0xb98328,
+              emissiveIntensity: 0.18,
+              roughness: 0.85,
+              flatShading: true,
             }),
           );
-          crumbMesh.position.set(x, 0.34, z);
+          crumbMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+          crumbMesh.castShadow = true;
+          crumbMesh.position.set(x, 0.18, z);
           group.add(crumbMesh);
           crumbs.push({ mesh: crumbMesh, position: crumbMesh.position.clone(), active: true });
           return;
         }
 
         if (cell === "T") {
-          const trap = new THREE.Group();
-          const base = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.58, 0.58, 0.16, 18),
-            new THREE.MeshStandardMaterial({ color: 0x8d6a48, roughness: 0.82 }),
-          );
-          base.receiveShadow = true;
-          trap.add(base);
-          for (let indexTooth = 0; indexTooth < 8; indexTooth += 1) {
-            const tooth = new THREE.Mesh(
-              new THREE.ConeGeometry(0.1, 0.42, 4),
-              new THREE.MeshStandardMaterial({ color: 0xd5d9de, metalness: 0.4, roughness: 0.35 }),
-            );
-            const angle = (Math.PI * 2 * indexTooth) / 8;
-            tooth.position.set(Math.cos(angle) * 0.44, 0.22, Math.sin(angle) * 0.44);
-            tooth.rotation.z = Math.PI;
-            trap.add(tooth);
-          }
-          trap.position.set(x, 0.08, z);
+          const trap = this.buildMouseTrap();
+          trap.position.set(x, 0.05, z);
+          trap.rotation.y = Math.random() * Math.PI;
           trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone() });
@@ -517,30 +511,11 @@ export class MouseRace3D {
     aliceLane.position.y = 0.02;
     group.add(aliceLane);
 
-    for (let indexMarker = 1; indexMarker <= 5; indexMarker += 1) {
-      const marker = new THREE.Mesh(
-        new THREE.CircleGeometry(0.36, 20),
-        new THREE.MeshStandardMaterial({
-          color: level.theme.accent,
-          emissive: level.theme.accent,
-          emissiveIntensity: 0.35,
-          transparent: true,
-          opacity: 0.5,
-          depthWrite: false,
-        }),
-      );
-      marker.rotation.x = -Math.PI / 2;
-      marker.position.y = 0.05;
-      group.add(marker);
-      pathMarkers.push(marker);
-    }
-
     return {
       walls,
       crumbs,
       traps,
       gems,
-      pathMarkers,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
       startPoint,
@@ -799,6 +774,69 @@ export class MouseRace3D {
     return group;
   }
 
+  private buildMouseTrap(): THREE.Group {
+    const group = new THREE.Group();
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0xc28a4a, roughness: 0.82 });
+    const woodDarkMat = new THREE.MeshStandardMaterial({ color: 0x8a5a28, roughness: 0.85 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.65, roughness: 0.35 });
+    const metalDarkMat = new THREE.MeshStandardMaterial({ color: 0x6e7077, metalness: 0.7, roughness: 0.4 });
+    const baitMat = new THREE.MeshStandardMaterial({ color: 0xffce46, roughness: 0.55, emissive: 0xb88318, emissiveIntensity: 0.12 });
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.13, 1.55), woodMat);
+    base.position.y = 0.065;
+    base.receiveShadow = true;
+    base.castShadow = true;
+    group.add(base);
+
+    const baseEdge = new THREE.Mesh(new THREE.BoxGeometry(0.97, 0.04, 1.57), woodDarkMat);
+    baseEdge.position.y = 0.018;
+    group.add(baseEdge);
+
+    const baitPad = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.02, 0.32), woodDarkMat);
+    baitPad.position.set(0, 0.14, 0.5);
+    group.add(baitPad);
+
+    const bait = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), baitMat);
+    bait.scale.set(1, 0.55, 1);
+    bait.position.set(0, 0.18, 0.5);
+    bait.castShadow = true;
+    group.add(bait);
+
+    const snapBar = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.025, 10, 24, Math.PI),
+      metalMat,
+    );
+    snapBar.rotation.set(0, 0, 0);
+    snapBar.position.set(0, 0.16, -0.2);
+    snapBar.castShadow = true;
+    group.add(snapBar);
+
+    for (const sx of [-0.42, 0.42]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), metalDarkMat);
+      post.position.set(sx, 0.18, -0.2);
+      group.add(post);
+    }
+
+    const spring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.025, 8, 18), metalMat);
+    spring.rotation.set(0, 0, Math.PI / 2);
+    spring.position.set(-0.42, 0.18, -0.2);
+    group.add(spring);
+    const spring2 = spring.clone();
+    spring2.position.set(0.42, 0.18, -0.2);
+    group.add(spring2);
+
+    const holdBar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 8), metalMat);
+    holdBar.rotation.x = Math.PI / 2;
+    holdBar.position.set(0.0, 0.16, 0.05);
+    group.add(holdBar);
+
+    const catchPin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.16), metalDarkMat);
+    catchPin.position.set(0, 0.155, 0.36);
+    group.add(catchPin);
+
+    return group;
+  }
+
   private buildAlice(): THREE.Group {
     const group = new THREE.Group();
     const skin = new THREE.MeshStandardMaterial({ color: 0xffdfd8, roughness: 0.75 });
@@ -878,7 +916,6 @@ export class MouseRace3D {
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
       this.updateGuidanceHud();
-      this.updatePathMarkers();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -1041,7 +1078,8 @@ export class MouseRace3D {
     const playerVector = this.player.position.clone().sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
-    const shouldChase = playerDistance < 6.4;
+    const chaseRange = this.levelIndex === 0 ? 4.2 : this.levelIndex === 1 ? 5.4 : 6.0;
+    const shouldChase = playerDistance < chaseRange;
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
@@ -1058,13 +1096,13 @@ export class MouseRace3D {
       return;
     }
 
-    const speedScale = shouldChase ? 1.38 : 1;
+    const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : 0.85;
     vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
 
-    if (this.player.position.distanceToSquared(this.cat.position) < 1.1 * 1.1) {
+    if (this.player.position.distanceToSquared(this.cat.position) < 0.85 * 0.85) {
       this.triggerHazard("The cat caught you!");
     }
   }
@@ -1073,7 +1111,7 @@ export class MouseRace3D {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
       crumb.mesh.rotation.y += 0.03;
-      if (this.player.position.distanceToSquared(crumb.position) < 0.7 * 0.7) {
+      if (this.player.position.distanceToSquared(crumb.position) < 1.0 * 1.0) {
         crumb.active = false;
         crumb.mesh.visible = false;
         this.crumbs += 1;
@@ -1089,8 +1127,7 @@ export class MouseRace3D {
     }
 
     for (const trap of this.maze.traps) {
-      trap.mesh.rotation.y += 0.02;
-      if (this.player.position.distanceToSquared(trap.position) < 0.72 * 0.72) {
+      if (this.player.position.distanceToSquared(trap.position) < 0.85 * 0.85) {
         this.triggerHazard("A mousetrap snapped shut!");
       }
     }
@@ -1099,13 +1136,13 @@ export class MouseRace3D {
       if (!gem.active) continue;
       gem.mesh.rotation.y += 0.04;
       gem.mesh.position.y = 0.55 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.08;
-      if (this.player.position.distanceToSquared(gem.position) < 0.86 * 0.86) {
+      if (this.player.position.distanceToSquared(gem.position) < 1.05 * 1.05) {
         this.teleportFromGem(gem);
       }
     }
 
     this.cheese.rotation.y += 0.02;
-    if (this.player.position.distanceToSquared(this.cheese.position) < 0.9 * 0.9) {
+    if (this.player.position.distanceToSquared(this.cheese.position) < 1.2 * 1.2) {
       this.completeLevel();
     }
   }
@@ -1422,42 +1459,6 @@ export class MouseRace3D {
     this.lastDistanceText = distance.toFixed(1);
   }
 
-  private updatePathMarkers(): void {
-    if (!this.maze?.pathMarkers.length) {
-      return;
-    }
-
-    const route = this.cheese.position.clone().sub(this.player.position);
-    route.y = 0;
-    const totalDistance = route.length();
-    if (totalDistance < 0.01) {
-      this.maze.pathMarkers.forEach((marker) => {
-        marker.visible = false;
-      });
-      return;
-    }
-
-    route.normalize();
-    const lateral = new THREE.Vector3(-route.z, 0, route.x);
-
-    this.maze.pathMarkers.forEach((marker, indexMarker) => {
-      const segment = Math.min(totalDistance - 0.8, 1.8 + indexMarker * 2.1);
-      if (segment <= 0.4) {
-        marker.visible = false;
-        return;
-      }
-
-      const sway = ((indexMarker % 2 === 0 ? -1 : 1) * 0.35) + Math.sin(performance.now() * 0.002 + indexMarker) * 0.08;
-      marker.visible = true;
-      marker.position.set(
-        this.player.position.x + route.x * segment + lateral.x * sway,
-        0.05,
-        this.player.position.z + route.z * segment + lateral.z * sway,
-      );
-      (marker.material as THREE.MeshStandardMaterial).opacity = Math.max(0.2, 0.62 - indexMarker * 0.08);
-    });
-  }
-
   private getStateSnapshot(): Record<string, unknown> {
     const level = LEVELS[this.levelIndex];
     const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / level.aliceTimeMs) : 0;
@@ -1485,7 +1486,6 @@ export class MouseRace3D {
       },
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
-      visibleTrailMarkers: this.maze?.pathMarkers.filter((marker) => marker.visible).length ?? 0,
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
       catMode: this.catChasing ? "chasing" : "patrolling",

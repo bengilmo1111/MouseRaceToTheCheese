@@ -25,8 +25,8 @@ export const LEVELS: LevelDefinition[] = [
   {
     id: 1,
     title: "Pantry Dash",
-    aliceTimeMs: 42000,
-    catSpeed: 88,
+    aliceTimeMs: 56000,
+    catSpeed: 60,
     theme: {
       name: "Pantry",
       skyTop: "#f7d487",
@@ -55,8 +55,8 @@ export const LEVELS: LevelDefinition[] = [
   {
     id: 2,
     title: "Garden Run",
-    aliceTimeMs: 36000,
-    catSpeed: 112,
+    aliceTimeMs: 48000,
+    catSpeed: 90,
     theme: {
       name: "Garden",
       skyTop: "#9dd9ac",
@@ -85,8 +85,8 @@ export const LEVELS: LevelDefinition[] = [
   {
     id: 3,
     title: "Moonlight Attic",
-    aliceTimeMs: 32000,
-    catSpeed: 126,
+    aliceTimeMs: 42000,
+    catSpeed: 110,
     theme: {
       name: "Attic",
       skyTop: "#8093d8",
