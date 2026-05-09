@@ -27,6 +27,7 @@ type MazeState = {
   crumbs: MazePickup[];
   traps: MazeHazard[];
   gems: MazePickup[];
+  pathMarkers: THREE.Mesh[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
   startPoint: THREE.Vector3;
@@ -294,6 +295,7 @@ export class MouseRace3D {
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
     const gems: MazePickup[] = [];
+    const pathMarkers: THREE.Mesh[] = [];
     const patrol: THREE.Vector3[] = [];
 
     const rows = level.map.length;
@@ -459,11 +461,30 @@ export class MouseRace3D {
     aliceLane.position.y = 0.02;
     group.add(aliceLane);
 
+    for (let indexMarker = 1; indexMarker <= 5; indexMarker += 1) {
+      const marker = new THREE.Mesh(
+        new THREE.CircleGeometry(0.36, 20),
+        new THREE.MeshStandardMaterial({
+          color: level.theme.accent,
+          emissive: level.theme.accent,
+          emissiveIntensity: 0.35,
+          transparent: true,
+          opacity: 0.5,
+          depthWrite: false,
+        }),
+      );
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.y = 0.05;
+      group.add(marker);
+      pathMarkers.push(marker);
+    }
+
     return {
       walls,
       crumbs,
       traps,
       gems,
+      pathMarkers,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
       startPoint,
@@ -676,6 +697,7 @@ export class MouseRace3D {
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
       this.updateGuidanceHud();
+      this.updatePathMarkers();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -1045,6 +1067,9 @@ export class MouseRace3D {
     this.gemCooldownUntil = 0;
     this.catChasing = false;
     this.playerHeading = Math.PI;
+    this.cameraYaw = Math.PI;
+    this.player.position.y = 0.3;
+    this.flashHint("Back to the start. Follow the glowing trail.");
     this.updatePlaytestState();
   }
 
@@ -1093,6 +1118,42 @@ export class MouseRace3D {
     this.hud.guide.textContent = `Cheese: ${label} · ${distance.toFixed(1)}m`;
     this.hud.cat.textContent = this.catChasing ? "Cat: Chasing" : "Cat: Patrolling";
     this.hud.cat.classList.toggle("alert", this.catChasing);
+  }
+
+  private updatePathMarkers(): void {
+    if (!this.maze?.pathMarkers.length) {
+      return;
+    }
+
+    const route = this.cheese.position.clone().sub(this.player.position);
+    route.y = 0;
+    const totalDistance = route.length();
+    if (totalDistance < 0.01) {
+      this.maze.pathMarkers.forEach((marker) => {
+        marker.visible = false;
+      });
+      return;
+    }
+
+    route.normalize();
+    const lateral = new THREE.Vector3(-route.z, 0, route.x);
+
+    this.maze.pathMarkers.forEach((marker, indexMarker) => {
+      const segment = Math.min(totalDistance - 0.8, 1.8 + indexMarker * 2.1);
+      if (segment <= 0.4) {
+        marker.visible = false;
+        return;
+      }
+
+      const sway = ((indexMarker % 2 === 0 ? -1 : 1) * 0.35) + Math.sin(performance.now() * 0.002 + indexMarker) * 0.08;
+      marker.visible = true;
+      marker.position.set(
+        this.player.position.x + route.x * segment + lateral.x * sway,
+        0.05,
+        this.player.position.z + route.z * segment + lateral.z * sway,
+      );
+      (marker.material as THREE.MeshStandardMaterial).opacity = Math.max(0.2, 0.62 - indexMarker * 0.08);
+    });
   }
 
   private getStateSnapshot(): Record<string, unknown> {
