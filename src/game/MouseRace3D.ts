@@ -1175,6 +1175,7 @@ export class MouseRace3D {
       player: {
         x: Number(this.player.position.x.toFixed(2)),
         z: Number(this.player.position.z.toFixed(2)),
+        headingDeg: Number(THREE.MathUtils.radToDeg(this.playerHeading).toFixed(1)),
       },
       cat: {
         x: Number(this.cat.position.x.toFixed(2)),
@@ -1186,7 +1187,11 @@ export class MouseRace3D {
       },
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
+      visibleTrailMarkers: this.maze?.pathMarkers.filter((marker) => marker.visible).length ?? 0,
       aliceProgress: Number(aliceProgress.toFixed(2)),
+      cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
+      catMode: this.catChasing ? "chasing" : "patrolling",
+      guide: this.hud.guide.textContent,
       hint: this.hud.hint.textContent,
     };
   }
