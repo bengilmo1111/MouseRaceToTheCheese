@@ -375,6 +375,7 @@ export class MouseRace3D {
             trap.add(tooth);
           }
           trap.position.set(x, 0.08, z);
+          trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone() });
           return;
@@ -393,6 +394,7 @@ export class MouseRace3D {
           );
           gem.position.set(x, 0.55, z);
           gem.castShadow = true;
+          gem.add(this.createWorldMarker("ZIP", level.theme.accent, 0xffffff, 1.05));
           group.add(gem);
           gems.push({ mesh: gem, position: gem.position.clone(), active: true });
           return;
@@ -622,6 +624,38 @@ export class MouseRace3D {
     }
 
     return group;
+  }
+
+  private createWorldMarker(text: string, color: number, textColor: number, height: number): THREE.Object3D {
+    const canvas = document.createElement("canvas");
+    canvas.width = 192;
+    canvas.height = 96;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return new THREE.Group();
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#fff9ef";
+    context.strokeStyle = `#${color.toString(16).padStart(6, "0")}`;
+    context.lineWidth = 8;
+    context.beginPath();
+    context.roundRect(10, 10, 172, 54, 18);
+    context.fill();
+    context.stroke();
+    context.fillStyle = `#${textColor.toString(16).padStart(6, "0")}`;
+    context.font = "bold 34px Trebuchet MS";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, 96, 38);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(0, height, 0);
+    sprite.scale.set(1.8, 0.9, 1);
+    return sprite;
   }
 
   private animate = (): void => {
