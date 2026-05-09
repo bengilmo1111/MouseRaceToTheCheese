@@ -9,15 +9,61 @@
     <title>Mouse Race To The Cheese</title>
     <meta
       name="description"
-      content="A bright browser maze game where a quick little mouse races Alice to a giant wedge of parmesan."
+      content="A playful 3D maze race where a brave mouse beats Alice to a giant wedge of parmesan."
     />
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
     <div id="app">
       <div id="game-shell">
-        <div id="game-frame">
-          <div id="game-container"></div>
+        <div id="game-container"></div>
+        <div id="hud" class="hidden">
+          <div class="hud-left">
+            <div id="hud-level" class="hud-pill"></div>
+            <div id="hud-lives" class="hud-pill"></div>
+            <div id="hud-crumbs" class="hud-pill"></div>
+          </div>
+          <div class="hud-center">
+            <div id="timer-label">Alice is coming</div>
+            <div id="timer-track"><div id="timer-fill"></div></div>
+          </div>
+          <div class="hud-right">
+            <button id="fullscreen-btn" class="hud-button" type="button">Full</button>
+            <div id="hud-hint" class="hud-hint">Find the parmesan before Alice does.</div>
+          </div>
+        </div>
+        <div id="start-screen" class="screen">
+          <div class="screen-card hero-card">
+            <div class="hero-badge">3D Maze Race</div>
+            <h1>Mouse Race To The Cheese</h1>
+            <p>
+              Sprint through the maze, grab crumbs, dodge traps, slip past the cat,
+              and reach the parmesan before Alice crawls in from outside.
+            </p>
+            <div class="hero-notes">
+              <span>Keyboard: WASD or arrows</span>
+              <span>Touch: hold the big movement pads</span>
+              <span>Each 3 crumbs earns 1 extra life</span>
+            </div>
+            <button id="start-btn" class="primary-btn" type="button">Start Race</button>
+          </div>
+        </div>
+        <div id="overlay" class="screen hidden">
+          <div class="screen-card">
+            <h2 id="overlay-title"></h2>
+            <p id="overlay-body"></p>
+            <button id="overlay-btn" class="primary-btn" type="button">Continue</button>
+          </div>
+        </div>
+        <div id="touch-controls">
+          <div class="touch-stack left">
+            <button id="touch-up" class="touch-btn arrow" type="button">▲</button>
+            <div class="touch-row">
+              <button id="touch-left" class="touch-btn arrow" type="button">◀</button>
+              <button id="touch-down" class="touch-btn arrow" type="button">▼</button>
+              <button id="touch-right" class="touch-btn arrow" type="button">▶</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
