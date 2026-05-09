@@ -51,6 +51,9 @@ export class MouseRace3D {
   private readonly moveSpeed = 4.8;
   private readonly hazardGraceMs = 1300;
   private readonly cameraTarget = new THREE.Vector3();
+  private readonly cameraForward = new THREE.Vector3();
+  private readonly cameraRight = new THREE.Vector3();
+  private readonly movementDelta = new THREE.Vector3();
   private readonly playerVelocity = new THREE.Vector3();
   private readonly controls: Record<ControlKey, boolean> = {
     up: false,
@@ -708,11 +711,9 @@ export class MouseRace3D {
       return;
     }
 
-    const delta = new THREE.Vector3();
-    if (direction === "up") delta.set(0, 0, -0.7);
-    if (direction === "down") delta.set(0, 0, 0.7);
-    if (direction === "left") delta.set(-0.7, 0, 0);
-    if (direction === "right") delta.set(0.7, 0, 0);
+    const strafeAmount = direction === "right" ? 1 : direction === "left" ? -1 : 0;
+    const forwardAmount = direction === "up" ? 1 : direction === "down" ? -1 : 0;
+    const delta = this.getCameraRelativeDelta(strafeAmount, forwardAmount, 0.7);
 
     this.moveWithCollisions(this.player.position, PLAYER_RADIUS, delta);
     if (delta.lengthSq() > 0) {
@@ -774,21 +775,7 @@ export class MouseRace3D {
   private updatePlayer(delta: number): void {
     const strafeAmount = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
     const forwardAmount = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
-
-    const cameraForward = new THREE.Vector3();
-    this.camera.getWorldDirection(cameraForward);
-    cameraForward.y = 0;
-    if (cameraForward.lengthSq() === 0) {
-      cameraForward.set(0, 0, -1);
-    } else {
-      cameraForward.normalize();
-    }
-
-    const cameraRight = new THREE.Vector3().crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
-
-    this.playerVelocity
-      .copy(cameraForward.multiplyScalar(forwardAmount))
-      .add(cameraRight.multiplyScalar(strafeAmount));
+    this.playerVelocity.copy(this.getCameraRelativeDelta(strafeAmount, forwardAmount, 1));
 
     if (this.playerVelocity.lengthSq() > 1) {
       this.playerVelocity.normalize();
@@ -804,6 +791,23 @@ export class MouseRace3D {
 
     const bob = Math.sin(performance.now() * 0.01) * 0.03;
     this.player.position.y = 0.3 + bob;
+  }
+
+  private getCameraRelativeDelta(strafeAmount: number, forwardAmount: number, scale: number): THREE.Vector3 {
+    this.camera.getWorldDirection(this.cameraForward);
+    this.cameraForward.y = 0;
+    if (this.cameraForward.lengthSq() === 0) {
+      this.cameraForward.set(0, 0, -1);
+    } else {
+      this.cameraForward.normalize();
+    }
+
+    this.cameraRight.crossVectors(this.cameraForward, THREE.Object3D.DEFAULT_UP).normalize();
+    return this.movementDelta
+      .copy(this.cameraForward)
+      .multiplyScalar(forwardAmount)
+      .addScaledVector(this.cameraRight, strafeAmount)
+      .multiplyScalar(scale);
   }
 
   private moveWithCollisions(position: THREE.Vector3, radius: number, delta: THREE.Vector3): void {
