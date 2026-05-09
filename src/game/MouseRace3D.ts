@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { LEVELS, LevelDefinition } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
+import { AudioBus } from "./audio";
+
+const MUTE_KEY = "mouseRace.muted";
 
 type ControlKey = "up" | "down" | "left" | "right";
 
@@ -27,8 +30,8 @@ type MazeState = {
   walls: WallRect[];
   crumbs: MazePickup[];
   traps: MazeHazard[];
+  trapGlows: THREE.Mesh[];
   gems: MazePickup[];
-  pathMarkers: THREE.Mesh[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
   startPoint: THREE.Vector3;
@@ -49,13 +52,23 @@ export class MouseRace3D {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly clock = new THREE.Clock();
   private readonly tileSize = 2.6;
-  private readonly moveSpeed = 4.8;
+  private readonly moveSpeed = 6.0;
+  private readonly accel = 18;
+  private readonly decel = 12;
+  private readonly turnSpeed = 3.0;
   private readonly hazardGraceMs = 1300;
   private readonly cameraTarget = new THREE.Vector3();
-  private readonly cameraForward = new THREE.Vector3();
-  private readonly cameraRight = new THREE.Vector3();
   private readonly movementDelta = new THREE.Vector3();
   private readonly playerVelocity = new THREE.Vector3();
+  private currentSpeed = 0;
+  private targetSpeed = 0;
+  private bankAngle = 0;
+  private pitchAngle = 0;
+  private turnRate = 0;
+  private cameraShakeAmp = 0;
+  private paused = false;
+  private footstepAccum = 0;
+  private readonly audio = new AudioBus();
   private readonly controls: Record<ControlKey, boolean> = {
     up: false,
     down: false,
@@ -76,8 +89,9 @@ export class MouseRace3D {
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
   private playtestTick = 0;
-  private playerHeading = Math.PI;
-  private cameraYaw = Math.PI;
+  private playerHeading = 0;
+  private cameraYaw = 0;
+  private cameraInitialized = false;
   private catChasing = false;
   private cameraShakeAmount = 0;
 
@@ -86,20 +100,27 @@ export class MouseRace3D {
 
   private maze!: MazeState;
   private player!: THREE.Group;
+  private mouseParts!: {
+    earL: THREE.Object3D;
+    earR: THREE.Object3D;
+    tail: THREE.Object3D;
+    eyeL: THREE.Object3D;
+    eyeR: THREE.Object3D;
+  };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
   private alice!: THREE.Group;
 
   private readonly hud = {
     root: this.must<HTMLDivElement>("hud"),
-    level: this.must<HTMLDivElement>("hud-level"),
-    lives: this.must<HTMLDivElement>("hud-lives"),
-    crumbs: this.must<HTMLDivElement>("hud-crumbs"),
-    hint: this.must<HTMLDivElement>("hud-hint"),
-    guide: this.must<HTMLDivElement>("hud-guide"),
-    cat: this.must<HTMLDivElement>("hud-cat"),
+    status: this.must<HTMLDivElement>("hud-status"),
+    toast: this.must<HTMLDivElement>("hud-toast"),
+    vignette: this.must<HTMLDivElement>("vignette"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
   };
+  private lastGuideLabel = "";
+  private lastDistanceText = "";
+  private readonly pickupBursts: { mesh: THREE.Points; ageMs: number; lifeMs: number }[] = [];
 
   private readonly startScreen = this.must<HTMLDivElement>("start-screen");
   private readonly overlay = {
@@ -122,6 +143,7 @@ export class MouseRace3D {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.host.appendChild(this.renderer.domElement);
 
+    this.audio.setMuted(localStorage.getItem(MUTE_KEY) === "1");
     this.buildSceneShell();
     this.bindUi();
     this.bindPlaytestUi();
@@ -141,20 +163,33 @@ export class MouseRace3D {
   }
 
   private buildSceneShell(): void {
-    this.scene.fog = new THREE.Fog(0xfdebc0, 15, 44);
+    this.scene.fog = new THREE.Fog(0xfdebc0, 18, 52);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    const hemi = new THREE.HemisphereLight(0xfff6d9, 0x946737, 1.4);
+    const hemi = new THREE.HemisphereLight(0xfff6d9, 0x6e4421, 1.1);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xfff6db, 2.3);
-    sun.position.set(10, 18, 8);
+    const sun = new THREE.DirectionalLight(0xfff1c7, 2.1);
+    sun.position.set(12, 22, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -24;
-    sun.shadow.camera.right = 24;
-    sun.shadow.camera.top = 24;
-    sun.shadow.camera.bottom = -24;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -28;
+    sun.shadow.camera.right = 28;
+    sun.shadow.camera.top = 28;
+    sun.shadow.camera.bottom = -28;
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.04;
+    sun.shadow.radius = 4;
     this.scene.add(sun);
+
+    const rim = new THREE.DirectionalLight(0xffd7a0, 0.55);
+    rim.position.set(-9, 7, -12);
+    this.scene.add(rim);
+
+    const ambient = new THREE.AmbientLight(0xffe6bd, 0.18);
+    this.scene.add(ambient);
 
     const floorGlow = new THREE.Mesh(
       new THREE.CircleGeometry(46, 48),
@@ -194,6 +229,19 @@ export class MouseRace3D {
       }
     });
 
+    const muteBtn = this.must<HTMLButtonElement>("mute-btn");
+    const refreshMuteIcon = (): void => {
+      muteBtn.textContent = this.audio.isMuted() ? "🔇" : "🔊";
+    };
+    refreshMuteIcon();
+    muteBtn.addEventListener("click", () => {
+      this.audio.resume();
+      const next = !this.audio.isMuted();
+      this.audio.setMuted(next);
+      localStorage.setItem(MUTE_KEY, next ? "1" : "0");
+      refreshMuteIcon();
+    });
+
     window.addEventListener("keydown", (event) => {
       if (event.code === "ArrowUp" || event.code === "KeyW") this.controls.up = true;
       if (event.code === "ArrowDown" || event.code === "KeyS") this.controls.down = true;
@@ -202,6 +250,9 @@ export class MouseRace3D {
       if (event.code === "Space") {
         event.preventDefault();
         this.advanceOverlayFlow();
+      }
+      if (event.code === "Escape") {
+        this.togglePause();
       }
     });
 
@@ -240,6 +291,32 @@ export class MouseRace3D {
   }
 
   private bindPlaytestUi(): void {
+    const params = new URLSearchParams(window.location.search);
+    const showPanel = params.get("playtest") === "1" || window.location.hash.includes("playtest");
+    const panel = document.getElementById("playtest-panel");
+    if (panel && showPanel) {
+      panel.classList.remove("hidden");
+    }
+
+    const agentApi = {
+      state: () => this.getStateSnapshot(),
+      step: (dir: ControlKey) => this.stepMove(dir),
+      startRun: () => this.startRun(true),
+      reset: () => this.startRun(false),
+      advance: () => this.advanceOverlayFlow(),
+      warpCrumb: () => this.warpToPickup("crumb"),
+      warpGem: () => this.warpToPickup("gem"),
+      warpTrap: () => this.warpToHazard("trap"),
+      warpCheese: () => this.warpToCheese(),
+      warpCat: () => this.warpToCat(),
+      forceHit: () => this.triggerHazard("Forced agent hit."),
+      setAliceProgress: (ratio: number) => {
+        this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * Math.max(0, Math.min(1, ratio));
+      },
+      showPanel: () => panel?.classList.remove("hidden"),
+    };
+    (window as unknown as { mouseRace?: typeof agentApi }).mouseRace = agentApi;
+
     this.must<HTMLButtonElement>("ptest-start").addEventListener("click", () => this.startRun(true));
     this.must<HTMLButtonElement>("ptest-continue").addEventListener("click", () => this.advanceOverlayFlow());
     this.must<HTMLButtonElement>("ptest-reset").addEventListener("click", () => this.startRun(false));
@@ -263,6 +340,7 @@ export class MouseRace3D {
     if (fromStartScreen) {
       this.startScreen.classList.add("hidden");
     }
+    this.audio.resume();
 
     if (this.bgMusic.paused) {
       this.bgMusic.play().catch((e) => console.warn("Audio play failed", e));
@@ -296,9 +374,18 @@ export class MouseRace3D {
     this.player.position.copy(this.maze.startPoint);
     this.cat.position.copy(this.maze.catPoint);
     this.cheese.position.copy(this.maze.cheesePoint);
-    this.playerHeading = Math.PI;
-    this.cameraYaw = Math.PI;
+    this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
+    this.cameraYaw = this.playerHeading;
+    this.player.rotation.y = this.playerHeading;
+    this.cameraInitialized = false;
+    this.currentSpeed = 0;
+    this.targetSpeed = 0;
+    this.turnRate = 0;
+    this.bankAngle = 0;
+    this.pitchAngle = 0;
+    this.footstepAccum = 0;
     this.catChasing = false;
+    this.hud.vignette.classList.remove("active");
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
     this.refreshHud();
@@ -309,8 +396,8 @@ export class MouseRace3D {
     const walls: WallRect[] = [];
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
+    const trapGlows: THREE.Mesh[] = [];
     const gems: MazePickup[] = [];
-    const pathMarkers: THREE.Mesh[] = [];
     const patrol: THREE.Vector3[] = [];
 
     const rows = level.map.length;
@@ -359,59 +446,59 @@ export class MouseRace3D {
         }
 
         if (cell === ".") {
+          const crumbGeom = new THREE.IcosahedronGeometry(0.18, 0);
+          const posAttr = crumbGeom.getAttribute("position") as THREE.BufferAttribute;
+          for (let v = 0; v < posAttr.count; v += 1) {
+            const jitter = 0.55 + Math.random() * 0.6;
+            posAttr.setXYZ(v, posAttr.getX(v) * jitter, posAttr.getY(v) * (0.5 + Math.random() * 0.6), posAttr.getZ(v) * jitter);
+          }
+          crumbGeom.computeVertexNormals();
           const crumbMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.16, 12, 12),
+            crumbGeom,
             new THREE.MeshStandardMaterial({
-              color: 0xffef91,
-              emissive: 0xffc84e,
-              emissiveIntensity: 0.6,
+              color: 0xf2d27a,
+              emissive: 0xb98328,
+              emissiveIntensity: 0.18,
+              roughness: 0.85,
+              flatShading: true,
             }),
           );
-          crumbMesh.position.set(x, 0.34, z);
+          crumbMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+          crumbMesh.castShadow = true;
+          crumbMesh.position.set(x, 0.18, z);
           group.add(crumbMesh);
           crumbs.push({ mesh: crumbMesh, position: crumbMesh.position.clone(), active: true });
           return;
         }
 
         if (cell === "T") {
-          const trap = new THREE.Group();
-          const base = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.58, 0.58, 0.16, 18),
-            new THREE.MeshStandardMaterial({ color: 0x8d6a48, roughness: 0.82 }),
-          );
-          base.receiveShadow = true;
-          trap.add(base);
-          for (let indexTooth = 0; indexTooth < 8; indexTooth += 1) {
-            const tooth = new THREE.Mesh(
-              new THREE.ConeGeometry(0.1, 0.42, 4),
-              new THREE.MeshStandardMaterial({ color: 0xd5d9de, metalness: 0.4, roughness: 0.35 }),
-            );
-            const angle = (Math.PI * 2 * indexTooth) / 8;
-            tooth.position.set(Math.cos(angle) * 0.44, 0.22, Math.sin(angle) * 0.44);
-            tooth.rotation.z = Math.PI;
-            trap.add(tooth);
-          }
-          trap.position.set(x, 0.08, z);
+          const trap = this.buildMouseTrap();
+          trap.position.set(x, 0.05, z);
+          trap.rotation.y = Math.random() * Math.PI;
           trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone() });
+
+          const glow = new THREE.Mesh(
+            new THREE.RingGeometry(0.55, 0.95, 32),
+            new THREE.MeshBasicMaterial({
+              color: 0xff5a3a,
+              transparent: true,
+              opacity: 0.35,
+              side: THREE.DoubleSide,
+              depthWrite: false,
+            }),
+          );
+          glow.rotation.x = -Math.PI / 2;
+          glow.position.set(x, 0.012, z);
+          group.add(glow);
+          trapGlows.push(glow);
           return;
         }
 
         if (cell === "G") {
-          const gem = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.36, 0),
-            new THREE.MeshStandardMaterial({
-              color: level.theme.accent,
-              emissive: level.theme.accent,
-              emissiveIntensity: 0.55,
-              roughness: 0.2,
-              metalness: 0.2,
-            }),
-          );
-          gem.position.set(x, 0.55, z);
-          gem.castShadow = true;
-          gem.add(this.createWorldMarker("ZIP", level.theme.accent, 0xffffff, 1.05));
+          const gem = this.buildGem(level.theme.accent);
+          gem.position.set(x, 0.6, z);
           group.add(gem);
           gems.push({ mesh: gem, position: gem.position.clone(), active: true });
           return;
@@ -476,30 +563,12 @@ export class MouseRace3D {
     aliceLane.position.y = 0.02;
     group.add(aliceLane);
 
-    for (let indexMarker = 1; indexMarker <= 5; indexMarker += 1) {
-      const marker = new THREE.Mesh(
-        new THREE.CircleGeometry(0.36, 20),
-        new THREE.MeshStandardMaterial({
-          color: level.theme.accent,
-          emissive: level.theme.accent,
-          emissiveIntensity: 0.35,
-          transparent: true,
-          opacity: 0.5,
-          depthWrite: false,
-        }),
-      );
-      marker.rotation.x = -Math.PI / 2;
-      marker.position.y = 0.05;
-      group.add(marker);
-      pathMarkers.push(marker);
-    }
-
     return {
       walls,
       crumbs,
       traps,
+      trapGlows,
       gems,
-      pathMarkers,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
       startPoint,
@@ -513,64 +582,239 @@ export class MouseRace3D {
 
   private buildMouse(): THREE.Group {
     const group = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xc7c3cf, roughness: 0.62 });
-    const earMaterial = new THREE.MeshStandardMaterial({ color: 0xf3c6da, roughness: 0.55 });
+    const fur = new THREE.MeshStandardMaterial({ color: 0xc4bdc9, roughness: 0.78 });
+    const bellyMat = new THREE.MeshStandardMaterial({ color: 0xf6eef3, roughness: 0.85 });
+    const earInner = new THREE.MeshStandardMaterial({ color: 0xf6b9cf, roughness: 0.55 });
+    const sclera = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28 });
+    const pupil = new THREE.MeshStandardMaterial({ color: 0x141114, roughness: 0.2 });
+    const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const noseMat = new THREE.MeshStandardMaterial({ color: 0xff7aa0, roughness: 0.35, emissive: 0x661022, emissiveIntensity: 0.3 });
+    const blushMat = new THREE.MeshStandardMaterial({ color: 0xff9bbf, roughness: 0.7, transparent: true, opacity: 0.55 });
+    const pawMat = new THREE.MeshStandardMaterial({ color: 0xf3a8c0, roughness: 0.6 });
+    const mouthMat = new THREE.MeshStandardMaterial({ color: 0x3a2228, roughness: 0.4 });
+    const whiskerMat = new THREE.LineBasicMaterial({ color: 0x2a2530, transparent: true, opacity: 0.55 });
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0xeea3b8, roughness: 0.5 });
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 18), bodyMaterial);
-    body.scale.set(1.25, 0.9, 1.5);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.45, 22, 22), fur);
+    body.scale.set(1.08, 0.94, 1.45);
+    body.position.y = 0.06;
     body.castShadow = true;
     group.add(body);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), bodyMaterial);
-    head.position.set(0, 0.12, -0.42);
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 18), bellyMat);
+    belly.scale.set(0.9, 0.7, 1.32);
+    belly.position.set(0, -0.08, 0.02);
+    group.add(belly);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 22, 22), fur);
+    head.position.set(0, 0.22, -0.52);
+    head.scale.set(1.08, 1.02, 1.05);
     head.castShadow = true;
     group.add(head);
 
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 14), bellyMat);
+    snout.scale.set(0.95, 0.72, 1.1);
+    snout.position.set(0, 0.08, -0.82);
+    group.add(snout);
+
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), noseMat);
+    nose.position.set(0, 0.11, -0.95);
+    group.add(nose);
+
+    const mouth = new THREE.Mesh(
+      new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI),
+      mouthMat,
+    );
+    mouth.rotation.set(0, 0, Math.PI);
+    mouth.position.set(0, 0.0, -0.9);
+    group.add(mouth);
+
+    const buildEye = (side: number): THREE.Group => {
+      const eyeGroup = new THREE.Group();
+      eyeGroup.position.set(side * 0.14, 0.28, -0.74);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(0.078, 16, 16), sclera);
+      white.scale.set(1, 1, 0.65);
+      eyeGroup.add(white);
+      const dark = new THREE.Mesh(new THREE.SphereGeometry(0.058, 14, 14), pupil);
+      dark.position.set(side * -0.008, -0.006, -0.04);
+      dark.scale.set(0.95, 1.05, 0.45);
+      eyeGroup.add(dark);
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), shineMat);
+      shine.position.set(side * -0.022, 0.022, -0.07);
+      eyeGroup.add(shine);
+      return eyeGroup;
+    };
+
+    const eyeL = buildEye(-1);
+    const eyeR = buildEye(1);
+    group.add(eyeL, eyeR);
+
     for (const side of [-1, 1]) {
-      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), earMaterial);
-      ear.position.set(side * 0.16, 0.34, -0.5);
-      ear.castShadow = true;
-      group.add(ear);
+      const blush = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), blushMat);
+      blush.scale.set(1, 0.45, 0.5);
+      blush.position.set(side * 0.24, 0.1, -0.74);
+      group.add(blush);
     }
 
-    const tail = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.05, 0.82, 8),
-      new THREE.MeshStandardMaterial({ color: 0xeea3b8, roughness: 0.5 }),
-    );
-    tail.rotation.z = Math.PI / 2.8;
-    tail.position.set(-0.42, -0.02, 0.4);
-    tail.castShadow = true;
-    group.add(tail);
+    const buildEar = (side: number): THREE.Group => {
+      const earGroup = new THREE.Group();
+      earGroup.position.set(side * 0.22, 0.46, -0.5);
+      const outer = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), fur);
+      outer.scale.set(0.98, 0.4, 1);
+      outer.castShadow = true;
+      earGroup.add(outer);
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), earInner);
+      inner.scale.set(0.9, 0.28, 0.95);
+      inner.position.y = 0.04;
+      earGroup.add(inner);
+      earGroup.rotation.z = side * 0.16;
+      return earGroup;
+    };
 
+    const earL = buildEar(-1);
+    const earR = buildEar(1);
+    group.add(earL, earR);
+
+    for (const side of [-1, 1]) {
+      const frontPaw = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), pawMat);
+      frontPaw.scale.set(1, 0.55, 1.2);
+      frontPaw.position.set(side * 0.18, -0.24, -0.32);
+      group.add(frontPaw);
+
+      const backPaw = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), pawMat);
+      backPaw.scale.set(1, 0.55, 1.3);
+      backPaw.position.set(side * 0.22, -0.26, 0.28);
+      group.add(backPaw);
+
+      const whiskerGeom = new THREE.BufferGeometry();
+      const wx = side * 0.14;
+      const verts: number[] = [];
+      for (let row = 0; row < 3; row += 1) {
+        const angle = (row - 1) * 0.2;
+        verts.push(wx, 0.04 + (row - 1) * 0.05, -0.86);
+        verts.push(side * (0.14 + 0.42 * Math.cos(angle)), 0.04 + (row - 1) * 0.06, -0.86 - 0.34 * Math.sin(angle) - 0.05);
+      }
+      whiskerGeom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+      const whiskers = new THREE.LineSegments(whiskerGeom, whiskerMat);
+      group.add(whiskers);
+    }
+
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(0, 0.02, 0.55);
+    const tailCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0.05, 0.08, 0.26),
+      new THREE.Vector3(-0.05, 0.22, 0.5),
+      new THREE.Vector3(0.04, 0.36, 0.7),
+    ]);
+    const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.05, 8, false), tailMat);
+    tail.castShadow = true;
+    tailGroup.add(tail);
+    group.add(tailGroup);
+
+    this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
     return group;
+  }
+
+  private animateMouse(): void {
+    if (!this.mouseParts) return;
+    const t = performance.now();
+
+    const idleWag = Math.sin(t * 0.006) * 0.18;
+    const turnWag = THREE.MathUtils.clamp(-this.turnRate * 0.18, -0.6, 0.6);
+    const speedFactor = 1 + Math.min(1.5, Math.abs(this.currentSpeed) * 0.18);
+    this.mouseParts.tail.rotation.z = (idleWag + turnWag) * speedFactor;
+    this.mouseParts.tail.rotation.y = Math.sin(t * 0.0072 + 0.7) * 0.1 * speedFactor;
+
+    const earBase = 0.16;
+    const twitch = Math.sin(t * 0.011) * 0.06 + (Math.sin(t * 0.0017) > 0.97 ? 0.18 : 0);
+    this.mouseParts.earL.rotation.z = -earBase + twitch;
+    this.mouseParts.earR.rotation.z = earBase - twitch;
+    this.mouseParts.earL.rotation.x = Math.sin(t * 0.009) * 0.05;
+    this.mouseParts.earR.rotation.x = Math.sin(t * 0.009 + 0.4) * 0.05;
+
+    const blinkPeriod = 3600;
+    const phase = (t % blinkPeriod) / blinkPeriod;
+    let blink = 0;
+    if (phase > 0.94) {
+      blink = Math.sin((phase - 0.94) / 0.06 * Math.PI);
+    }
+    const eyeY = 1 - blink * 0.92;
+    this.mouseParts.eyeL.scale.y = eyeY;
+    this.mouseParts.eyeR.scale.y = eyeY;
   }
 
   private buildCat(): THREE.Group {
     const group = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xf18944, roughness: 0.58 });
-    const stripeMaterial = new THREE.MeshStandardMaterial({ color: 0xae522d, roughness: 0.72 });
+    const fur = new THREE.MeshStandardMaterial({ color: 0xee8a3a, roughness: 0.7, metalness: 0.02 });
+    const stripe = new THREE.MeshStandardMaterial({ color: 0xa84a22, roughness: 0.78 });
+    const belly = new THREE.MeshStandardMaterial({ color: 0xfbe0b8, roughness: 0.85 });
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xfff08a, emissive: 0xfff08a, emissiveIntensity: 0.5, roughness: 0.3 });
+    const pupil = new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.2 });
+    const noseMat = new THREE.MeshStandardMaterial({ color: 0xff8aa8, roughness: 0.4 });
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 20), bodyMaterial);
-    body.scale.set(1.2, 0.95, 1.5);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 24), fur);
+    body.scale.set(1.18, 0.95, 1.52);
+    body.position.y = 0.06;
     body.castShadow = true;
     group.add(body);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 16), bodyMaterial);
-    head.position.set(0, 0.2, -0.46);
+    const bellyMesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 18, 18), belly);
+    bellyMesh.scale.set(0.95, 0.65, 1.3);
+    bellyMesh.position.set(0, -0.12, 0);
+    group.add(bellyMesh);
+
+    for (let i = 0; i < 5; i += 1) {
+      const stripeRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.38 + i * 0.02, 0.05, 8, 18, Math.PI),
+        stripe,
+      );
+      stripeRing.rotation.set(0, Math.PI / 2, 0);
+      stripeRing.position.set(0, 0.18 - i * 0.05, -0.35 + i * 0.18);
+      stripeRing.scale.set(1.2, 0.55, 1);
+      group.add(stripeRing);
+    }
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 18), fur);
+    head.position.set(0, 0.26, -0.5);
     head.castShadow = true;
     group.add(head);
 
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 14), belly);
+    snout.scale.set(1, 0.7, 0.8);
+    snout.position.set(0, 0.16, -0.74);
+    group.add(snout);
+
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), noseMat);
+    nose.position.set(0, 0.22, -0.82);
+    group.add(nose);
+
     for (const side of [-1, 1]) {
-      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.22, 4), stripeMaterial);
-      ear.position.set(side * 0.17, 0.5, -0.52);
-      ear.rotation.z = side * 0.12;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), eyeMat);
+      eye.position.set(side * 0.13, 0.32, -0.66);
+      group.add(eye);
+      const slit = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.07, 6), pupil);
+      slit.position.set(side * 0.13, 0.32, -0.7);
+      group.add(slit);
+
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.26, 4), fur);
+      ear.position.set(side * 0.2, 0.58, -0.56);
+      ear.rotation.set(0, Math.PI / 4, side * 0.15);
       ear.castShadow = true;
       group.add(ear);
+      const earInner = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 4), noseMat);
+      earInner.position.set(side * 0.2, 0.55, -0.55);
+      earInner.rotation.set(0, Math.PI / 4, side * 0.15);
+      group.add(earInner);
     }
 
-    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.96, 10), stripeMaterial);
-    tail.position.set(-0.54, 0.16, 0.44);
-    tail.rotation.z = Math.PI / 3.6;
+    const tailCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -0.05, 0.55),
+      new THREE.Vector3(0.1, 0.2, 0.85),
+      new THREE.Vector3(-0.05, 0.5, 1.0),
+      new THREE.Vector3(0.18, 0.7, 0.86),
+    ]);
+    const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.07, 8, false), fur);
     tail.castShadow = true;
     group.add(tail);
 
@@ -579,31 +823,49 @@ export class MouseRace3D {
 
   private buildCheese(): THREE.Group {
     const group = new THREE.Group();
-    const cheese = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.82, 0.56, 3),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd04f,
-        roughness: 0.52,
-        emissive: 0xf5a623,
-        emissiveIntensity: 0.18,
-      }),
-    );
-    cheese.rotation.y = Math.PI / 6;
-    cheese.rotation.x = Math.PI / 2;
-    cheese.castShadow = true;
-    group.add(cheese);
+    const cheeseMat = new THREE.MeshStandardMaterial({
+      color: 0xffce46,
+      roughness: 0.55,
+      emissive: 0xf5a623,
+      emissiveIntensity: 0.12,
+    });
+    const holeMat = new THREE.MeshStandardMaterial({
+      color: 0xc88e1c,
+      roughness: 0.92,
+      side: THREE.DoubleSide,
+    });
 
-    for (const hole of [
-      [-0.12, 0.06, -0.08, 0.12],
-      [0.18, -0.04, 0.08, 0.09],
-      [0.08, 0.12, -0.18, 0.07],
-    ]) {
-      const bubble = new THREE.Mesh(
-        new THREE.SphereGeometry(hole[3], 10, 10),
-        new THREE.MeshStandardMaterial({ color: 0xf1b92d, roughness: 0.58 }),
-      );
-      bubble.position.set(hole[0], hole[1], hole[2]);
-      group.add(bubble);
+    const wedgeShape = new THREE.Shape();
+    wedgeShape.moveTo(0, 0);
+    wedgeShape.lineTo(1.2, 0);
+    wedgeShape.lineTo(0, 0.78);
+    wedgeShape.lineTo(0, 0);
+    const wedge = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(wedgeShape, {
+        depth: 0.7,
+        bevelEnabled: true,
+        bevelThickness: 0.05,
+        bevelSize: 0.05,
+        bevelSegments: 3,
+      }),
+      cheeseMat,
+    );
+    wedge.position.set(-0.55, 0.0, -0.35);
+    wedge.castShadow = true;
+    wedge.receiveShadow = true;
+    group.add(wedge);
+
+    const holePositions = [
+      [-0.2, 0.18, 0.1, 0.09],
+      [0.18, 0.32, 0.34, 0.07],
+      [0.08, 0.48, -0.12, 0.06],
+      [-0.32, 0.12, -0.18, 0.08],
+      [0.32, 0.2, -0.04, 0.05],
+    ];
+    for (const hole of holePositions) {
+      const indent = new THREE.Mesh(new THREE.SphereGeometry(hole[3], 12, 10), holeMat);
+      indent.position.set(hole[0], hole[1], hole[2]);
+      group.add(indent);
     }
 
     const beacon = new THREE.Mesh(
@@ -631,6 +893,143 @@ export class MouseRace3D {
     goalRing.rotation.x = Math.PI / 2;
     goalRing.position.y = 0.08;
     group.add(goalRing);
+
+    return group;
+  }
+
+  private buildGem(accentColor: number): THREE.Group {
+    const group = new THREE.Group();
+
+    const hull = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.42, 0),
+      new THREE.MeshStandardMaterial({
+        color: accentColor,
+        emissive: accentColor,
+        emissiveIntensity: 0.55,
+        roughness: 0.06,
+        metalness: 0.55,
+        transparent: true,
+        opacity: 0.78,
+        flatShading: true,
+      }),
+    );
+    hull.scale.set(0.78, 1.45, 0.78);
+    hull.castShadow = true;
+    group.add(hull);
+
+    const facetEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(hull.geometry),
+      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }),
+    );
+    facetEdges.scale.copy(hull.scale);
+    group.add(facetEdges);
+
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.16, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    );
+    core.scale.set(0.95, 1.35, 0.95);
+    group.add(core);
+
+    const orbit = new THREE.Mesh(
+      new THREE.TorusGeometry(0.46, 0.022, 8, 36),
+      new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.7,
+      }),
+    );
+    orbit.rotation.x = Math.PI / 2.4;
+    group.add(orbit);
+
+    const orbit2 = new THREE.Mesh(
+      new THREE.TorusGeometry(0.5, 0.014, 8, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.45,
+      }),
+    );
+    orbit2.rotation.x = Math.PI / 1.8;
+    orbit2.rotation.z = Math.PI / 6;
+    group.add(orbit2);
+
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(0.24, 0.95, 36),
+      new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = -0.55;
+    group.add(halo);
+
+    return group;
+  }
+
+  private buildMouseTrap(): THREE.Group {
+    const group = new THREE.Group();
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0xc28a4a, roughness: 0.82 });
+    const woodDarkMat = new THREE.MeshStandardMaterial({ color: 0x8a5a28, roughness: 0.85 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 0.65, roughness: 0.35 });
+    const metalDarkMat = new THREE.MeshStandardMaterial({ color: 0x6e7077, metalness: 0.7, roughness: 0.4 });
+    const baitMat = new THREE.MeshStandardMaterial({ color: 0xffce46, roughness: 0.55, emissive: 0xb88318, emissiveIntensity: 0.12 });
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.13, 1.55), woodMat);
+    base.position.y = 0.065;
+    base.receiveShadow = true;
+    base.castShadow = true;
+    group.add(base);
+
+    const baseEdge = new THREE.Mesh(new THREE.BoxGeometry(0.97, 0.04, 1.57), woodDarkMat);
+    baseEdge.position.y = 0.018;
+    group.add(baseEdge);
+
+    const baitPad = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.02, 0.32), woodDarkMat);
+    baitPad.position.set(0, 0.14, 0.5);
+    group.add(baitPad);
+
+    const bait = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), baitMat);
+    bait.scale.set(1, 0.55, 1);
+    bait.position.set(0, 0.18, 0.5);
+    bait.castShadow = true;
+    group.add(bait);
+
+    const snapBar = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.025, 10, 24, Math.PI),
+      metalMat,
+    );
+    snapBar.rotation.set(0, 0, 0);
+    snapBar.position.set(0, 0.16, -0.2);
+    snapBar.castShadow = true;
+    group.add(snapBar);
+
+    for (const sx of [-0.42, 0.42]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), metalDarkMat);
+      post.position.set(sx, 0.18, -0.2);
+      group.add(post);
+    }
+
+    const spring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.025, 8, 18), metalMat);
+    spring.rotation.set(0, 0, Math.PI / 2);
+    spring.position.set(-0.42, 0.18, -0.2);
+    group.add(spring);
+    const spring2 = spring.clone();
+    spring2.position.set(0.42, 0.18, -0.2);
+    group.add(spring2);
+
+    const holdBar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 8), metalMat);
+    holdBar.rotation.x = Math.PI / 2;
+    holdBar.position.set(0.0, 0.16, 0.05);
+    group.add(holdBar);
+
+    const catchPin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.16), metalDarkMat);
+    catchPin.position.set(0, 0.155, 0.36);
+    group.add(catchPin);
 
     return group;
   }
@@ -698,7 +1097,7 @@ export class MouseRace3D {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
-    if (!this.isOverlayOpen() && this.maze) {
+    if (!this.isOverlayOpen() && !this.paused && this.maze) {
       this.updatePlayer(delta);
       this.updateCat(delta);
       this.updatePickups(delta);
@@ -708,11 +1107,13 @@ export class MouseRace3D {
       this.updateCamera(delta);
     }
 
+    this.updatePickupBursts(delta);
+    this.animateMouse();
+
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
       this.updateGuidanceHud();
-      this.updatePathMarkers();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -723,15 +1124,17 @@ export class MouseRace3D {
       return;
     }
 
-    const strafeAmount = direction === "right" ? 1 : direction === "left" ? -1 : 0;
-    const forwardAmount = direction === "up" ? 1 : direction === "down" ? -1 : 0;
-    const delta = this.getCameraRelativeDelta(strafeAmount, forwardAmount, 0.7);
-
-    this.moveWithCollisions(this.player.position, PLAYER_RADIUS, delta);
-    if (delta.lengthSq() > 0) {
-      this.playerHeading = Math.atan2(delta.x, delta.z);
-      this.player.rotation.y = this.playerHeading;
+    if (direction === "left" || direction === "right") {
+      this.playerHeading -= (direction === "right" ? 1 : -1) * 0.45;
+    } else {
+      const sign = direction === "up" ? 1 : -1;
+      const dx = -Math.sin(this.playerHeading) * sign * 0.7;
+      const dz = -Math.cos(this.playerHeading) * sign * 0.7;
+      this.movementDelta.set(dx, 0, dz);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.movementDelta);
     }
+
+    this.player.rotation.y = this.playerHeading;
     this.updatePickups(0);
     this.updatePlaytestState();
   }
@@ -785,16 +1188,45 @@ export class MouseRace3D {
   }
 
   private updatePlayer(delta: number): void {
-    const strafeAmount = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
-    const forwardAmount = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
-    this.playerVelocity.copy(this.getCameraRelativeDelta(strafeAmount, forwardAmount, 1));
+    const turnInput = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
+    const forwardInput = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
 
-    if (this.playerVelocity.lengthSq() > 1) {
-      this.playerVelocity.normalize();
+    const desiredTurnRate = -turnInput * this.turnSpeed * (this.currentSpeed > 1 ? 1 : 0.7);
+    this.turnRate = THREE.MathUtils.lerp(this.turnRate, desiredTurnRate, Math.min(1, delta * 8));
+    this.playerHeading += this.turnRate * delta;
+
+    this.targetSpeed = this.moveSpeed * forwardInput * (forwardInput < 0 ? 0.55 : 1);
+    const accelRate = forwardInput !== 0 ? this.accel : this.decel;
+    this.currentSpeed = THREE.MathUtils.lerp(
+      this.currentSpeed,
+      this.targetSpeed,
+      Math.min(1, delta * accelRate * 0.18),
+    );
+    if (Math.abs(this.currentSpeed) < 0.01) this.currentSpeed = 0;
+
+    if (this.currentSpeed !== 0) {
+      const forwardX = -Math.sin(this.playerHeading);
+      const forwardZ = -Math.cos(this.playerHeading);
+      this.playerVelocity.set(forwardX * this.currentSpeed * delta, 0, forwardZ * this.currentSpeed * delta);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
+      if (Math.abs(this.currentSpeed) > 0.4) {
+        this.footstepAccum += Math.abs(this.currentSpeed) * delta;
+        if (this.footstepAccum >= 0.45) {
+          this.footstepAccum = 0;
+          this.audio.tickFootstep();
+        }
+      } else {
+        this.footstepAccum = 0;
+      }
+    } else {
+      this.footstepAccum = 0;
     }
 
-    this.playerVelocity.multiplyScalar(this.moveSpeed * delta);
-    this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
+    const targetBank = THREE.MathUtils.clamp(-this.turnRate * 0.25, -0.35, 0.35);
+    this.bankAngle = THREE.MathUtils.lerp(this.bankAngle, targetBank, Math.min(1, delta * 8));
+    const speedFraction = this.currentSpeed / this.moveSpeed;
+    const targetPitch = THREE.MathUtils.clamp(speedFraction * 0.18, -0.18, 0.18);
+    this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, targetPitch, Math.min(1, delta * 6));
 
     if (this.playerVelocity.lengthSq() > 0) {
       this.playerHeading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
@@ -803,26 +1235,20 @@ export class MouseRace3D {
     } else {
       this.player.rotation.z = THREE.MathUtils.lerp(this.player.rotation.z, 0, 0.2);
     }
+    this.player.rotation.set(this.pitchAngle, this.playerHeading, this.bankAngle);
 
-    const bob = Math.sin(performance.now() * 0.01) * 0.03;
+    const moving = Math.abs(this.currentSpeed) > 0.2;
+    const bob = moving ? Math.sin(performance.now() * 0.018) * 0.05 * Math.abs(speedFraction) : 0;
     this.player.position.y = 0.3 + bob;
   }
 
-  private getCameraRelativeDelta(strafeAmount: number, forwardAmount: number, scale: number): THREE.Vector3 {
-    this.camera.getWorldDirection(this.cameraForward);
-    this.cameraForward.y = 0;
-    if (this.cameraForward.lengthSq() === 0) {
-      this.cameraForward.set(0, 0, -1);
-    } else {
-      this.cameraForward.normalize();
+  private headingFromTo(from: THREE.Vector3, to: THREE.Vector3): number {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    if (dx === 0 && dz === 0) {
+      return 0;
     }
-
-    this.cameraRight.crossVectors(this.cameraForward, THREE.Object3D.DEFAULT_UP).normalize();
-    return this.movementDelta
-      .copy(this.cameraForward)
-      .multiplyScalar(forwardAmount)
-      .addScaledVector(this.cameraRight, strafeAmount)
-      .multiplyScalar(scale);
+    return Math.atan2(-dx, -dz);
   }
 
   private moveWithCollisions(position: THREE.Vector3, radius: number, delta: THREE.Vector3): void {
@@ -868,11 +1294,15 @@ export class MouseRace3D {
     const playerVector = this.player.position.clone().sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
-    const shouldChase = playerDistance < 6.4;
+    const chaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
+    const shouldChase = playerDistance < chaseRange;
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
-      this.flashHint(shouldChase ? "The cat spotted you. Keep moving." : "The cat lost sight of you.");
+      this.flashHint(shouldChase ? "Cat spotted you!" : "Cat lost you.", shouldChase);
+      if (shouldChase) this.audio.playCatAlert();
+      else this.audio.playCatLost();
+      this.hud.vignette.classList.toggle("active", shouldChase);
     }
 
     const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
@@ -885,14 +1315,15 @@ export class MouseRace3D {
       return;
     }
 
-    const speedScale = shouldChase ? 1.38 : 1;
+    const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : 0.85;
     vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(vector.x, vector.z);
     this.cat.rotation.z = Math.sin(performance.now() * 0.012) * 0.15;
+    this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
 
-    if (this.player.position.distanceToSquared(this.cat.position) < 1.1 * 1.1) {
+    if (this.player.position.distanceToSquared(this.cat.position) < 0.85 * 0.85) {
       this.triggerHazard("The cat caught you!");
     }
   }
@@ -901,7 +1332,7 @@ export class MouseRace3D {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
       crumb.mesh.rotation.y += 0.03;
-      if (this.player.position.distanceToSquared(crumb.position) < 0.7 * 0.7) {
+      if (this.player.position.distanceToSquared(crumb.position) < 0.85 * 0.85) {
         crumb.active = false;
         crumb.mesh.visible = false;
         this.crumbs += 1;
@@ -913,31 +1344,47 @@ export class MouseRace3D {
           this.playTone(600, "square", 0.1, 0.2);
           setTimeout(() => this.playTone(900, "square", 0.3, 0.2), 100);
           this.flashHint("Three crumbs earned another life.");
+        if (this.extraLifeBank >= 6) {
+          this.extraLifeBank = 0;
+          this.lives += 1;
+          this.flashHint("+1 life");
+          this.audio.playLifeUp();
         } else {
-          this.flashHint("Crunch. More crumbs for your stash.");
+          this.audio.playCrumb();
         }
+        this.spawnPickupBurst(crumb.position, 0xffe084);
         this.refreshHud();
       }
     }
 
     for (const trap of this.maze.traps) {
-      trap.mesh.rotation.y += 0.02;
-      if (this.player.position.distanceToSquared(trap.position) < 0.72 * 0.72) {
+      if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
+        this.audio.playTrap();
         this.triggerHazard("A mousetrap snapped shut!");
+      }
+    }
+
+    if (this.maze.trapGlows.length) {
+      const t = performance.now() * 0.004;
+      const pulse = 0.5 + Math.sin(t) * 0.5;
+      const scale = 0.9 + pulse * 0.18;
+      for (const glow of this.maze.trapGlows) {
+        glow.scale.set(scale, scale, scale);
+        (glow.material as THREE.MeshBasicMaterial).opacity = 0.22 + pulse * 0.28;
       }
     }
 
     for (const gem of this.maze.gems) {
       if (!gem.active) continue;
       gem.mesh.rotation.y += 0.04;
-      gem.mesh.position.y = 0.55 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.08;
-      if (this.player.position.distanceToSquared(gem.position) < 0.86 * 0.86) {
+      gem.mesh.position.y = 0.6 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.1;
+      if (this.player.position.distanceToSquared(gem.position) < 0.95 * 0.95) {
         this.teleportFromGem(gem);
       }
     }
 
     this.cheese.rotation.y += 0.02;
-    if (this.player.position.distanceToSquared(this.cheese.position) < 0.9 * 0.9) {
+    if (this.player.position.distanceToSquared(this.cheese.position) < 1.0 * 1.0) {
       this.completeLevel();
     }
   }
@@ -958,6 +1405,8 @@ export class MouseRace3D {
     this.playTone(600, "triangle", 0.1, 0.2);
     setTimeout(() => this.playTone(1200, "triangle", 0.3, 0.2), 100);
     this.flashHint("Zip. The teleport gem shifted the maze under you.");
+    this.flashHint("Teleported!");
+    this.audio.playGem();
   }
 
   private playTone(frequency: number, type: OscillatorType, duration: number, volume: number = 0.1): void {
@@ -1027,6 +1476,115 @@ export class MouseRace3D {
       this.camera.position.x += (Math.random() - 0.5) * this.cameraShakeAmount;
       this.camera.position.z += (Math.random() - 0.5) * this.cameraShakeAmount;
       this.cameraShakeAmount = Math.max(0, this.cameraShakeAmount - delta * 2.0);
+  private updateCamera(_delta: number): void {
+    this.cameraYaw = this.playerHeading;
+    const baseDist = 5.4;
+    const height = 3.0;
+    const sinH = Math.sin(this.cameraYaw);
+    const cosH = Math.cos(this.cameraYaw);
+
+    const dist = this.clampCameraDistance(sinH, cosH, baseDist);
+    const desiredX = this.player.position.x + sinH * dist;
+    const desiredZ = this.player.position.z + cosH * dist;
+    const desiredY = this.player.position.y + height;
+    this.cameraTarget.set(desiredX, desiredY, desiredZ);
+
+    if (!this.cameraInitialized) {
+      this.camera.position.copy(this.cameraTarget);
+      this.cameraInitialized = true;
+    } else {
+      this.camera.position.lerp(this.cameraTarget, 0.22);
+    }
+
+    const lookAhead = 1.6 + Math.abs(this.currentSpeed) * 0.18;
+    const lookX = this.player.position.x - sinH * lookAhead;
+    const lookZ = this.player.position.z - cosH * lookAhead;
+    this.camera.lookAt(lookX, this.player.position.y + 0.5, lookZ);
+
+    const targetFov = 52 + THREE.MathUtils.clamp(Math.abs(this.currentSpeed) * 0.6, 0, 6);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.08);
+    this.camera.updateProjectionMatrix();
+
+    if (this.cameraShakeAmp > 0.002) {
+      this.camera.position.x += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.camera.position.y += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.camera.position.z += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.cameraShakeAmp *= 0.85;
+    }
+  }
+
+  private clampCameraDistance(sinH: number, cosH: number, baseDist: number): number {
+    if (!this.maze) return baseDist;
+    const margin = 0.6;
+    let maxDist = baseDist;
+    for (const wall of this.maze.walls) {
+      for (let step = 0.4; step <= baseDist; step += 0.4) {
+        const x = this.player.position.x + sinH * step;
+        const z = this.player.position.z + cosH * step;
+        if (x > wall.minX - margin && x < wall.maxX + margin && z > wall.minZ - margin && z < wall.maxZ + margin) {
+          maxDist = Math.min(maxDist, step - 0.3);
+          break;
+        }
+      }
+    }
+    return Math.max(2.6, maxDist);
+  }
+
+  private spawnPickupBurst(at: THREE.Vector3, color: number): void {
+    const count = 14;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3 + 0] = at.x;
+      positions[i * 3 + 1] = at.y;
+      positions[i * 3 + 2] = at.z;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.6 + Math.random() * 1.4;
+      velocities[i * 3 + 0] = Math.cos(angle) * speed;
+      velocities[i * 3 + 1] = 1.2 + Math.random() * 1.8;
+      velocities[i * 3 + 2] = Math.sin(angle) * speed;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute("velocity", new THREE.BufferAttribute(velocities, 3));
+    const mat = new THREE.PointsMaterial({
+      color,
+      size: 0.14,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+    });
+    const points = new THREE.Points(geom, mat);
+    this.scene.add(points);
+    this.pickupBursts.push({ mesh: points, ageMs: 0, lifeMs: 600 });
+  }
+
+  private updatePickupBursts(delta: number): void {
+    if (this.pickupBursts.length === 0) return;
+    const dtMs = delta * 1000;
+    for (let i = this.pickupBursts.length - 1; i >= 0; i -= 1) {
+      const burst = this.pickupBursts[i];
+      burst.ageMs += dtMs;
+      const t = burst.ageMs / burst.lifeMs;
+      if (t >= 1) {
+        this.scene.remove(burst.mesh);
+        burst.mesh.geometry.dispose();
+        (burst.mesh.material as THREE.PointsMaterial).dispose();
+        this.pickupBursts.splice(i, 1);
+        continue;
+      }
+      const posAttr = burst.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const velAttr = burst.mesh.geometry.getAttribute("velocity") as THREE.BufferAttribute;
+      for (let p = 0; p < posAttr.count; p += 1) {
+        posAttr.setX(p, posAttr.getX(p) + velAttr.getX(p) * delta);
+        posAttr.setY(p, posAttr.getY(p) + velAttr.getY(p) * delta);
+        posAttr.setZ(p, posAttr.getZ(p) + velAttr.getZ(p) * delta);
+        velAttr.setY(p, velAttr.getY(p) - 6 * delta);
+      }
+      posAttr.needsUpdate = true;
+      const mat = burst.mesh.material as THREE.PointsMaterial;
+      mat.opacity = 1 - t;
+      mat.size = 0.14 * (1 - t * 0.5);
     }
   }
 
@@ -1039,9 +1597,12 @@ export class MouseRace3D {
     this.cameraShakeAmount = 0.5;
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
     this.lives -= 1;
+    this.cameraShakeAmp = 0.45;
+    this.audio.playHazard();
     this.refreshHud();
 
     if (this.lives <= 0) {
+      this.audio.playGameOver();
       this.showOverlay("Game Over", `${message}\nAlice wins this race. Try again from the first maze.`);
       return;
     }
@@ -1055,6 +1616,7 @@ export class MouseRace3D {
     }
 
     this.levelComplete = true;
+    this.audio.playLevelComplete();
     if (this.levelIndex === LEVELS.length - 1) {
       this.hasWonGame = true;
       this.showOverlay(
@@ -1122,30 +1684,56 @@ export class MouseRace3D {
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
     this.catChasing = false;
-    this.playerHeading = Math.PI;
-    this.cameraYaw = Math.PI;
+    this.hud.vignette.classList.remove("active");
+    this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
+    this.cameraYaw = this.playerHeading;
+    this.player.rotation.y = this.playerHeading;
+    this.cameraInitialized = false;
+    this.currentSpeed = 0;
+    this.targetSpeed = 0;
+    this.turnRate = 0;
+    this.bankAngle = 0;
+    this.pitchAngle = 0;
+    this.footstepAccum = 0;
     this.player.position.y = 0.3;
-    this.flashHint("Back to the start. Follow the glowing trail.");
     this.updatePlaytestState();
   }
 
   private refreshHud(): void {
     const level = LEVELS[this.levelIndex];
-    this.hud.level.textContent = `Level ${level.id}: ${level.title}`;
-    this.hud.level.style.color = level.theme.hud;
-    this.hud.lives.textContent = `Lives: ${this.lives}`;
-    this.hud.lives.style.color = level.theme.hud;
-    this.hud.crumbs.textContent = `Crumbs: ${this.crumbs}  Next life in: ${3 - this.extraLifeBank}`;
-    this.hud.crumbs.style.color = level.theme.hud;
+    const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, 3 - this.lives));
+    this.hud.status.innerHTML =
+      `<span class="level">L${level.id} · ${level.title}</span>` +
+      `<span class="sep">·</span>` +
+      `<span class="hearts">${hearts}</span>` +
+      `<span class="sep">·</span>` +
+      `<span>🧀 ${this.crumbs}</span>`;
+    this.hud.status.style.color = level.theme.hud;
     this.updateGuidanceHud();
   }
 
-  private flashHint(text: string): void {
-    this.hud.hint.textContent = text;
+  private togglePause(): void {
+    if (!this.startScreen.classList.contains("hidden")) return;
+    if (!this.overlay.root.classList.contains("hidden")) return;
+    this.paused = !this.paused;
+    if (this.paused) {
+      window.clearTimeout(this.currentHintTimeout);
+      this.hud.toast.textContent = "Paused — Esc to resume";
+      this.hud.toast.classList.remove("alert");
+      this.hud.toast.classList.remove("hidden");
+    } else {
+      this.hud.toast.classList.add("hidden");
+    }
+  }
+
+  private flashHint(text: string, alert = false): void {
+    this.hud.toast.textContent = text;
+    this.hud.toast.classList.toggle("alert", alert);
+    this.hud.toast.classList.remove("hidden");
     window.clearTimeout(this.currentHintTimeout);
     this.currentHintTimeout = window.setTimeout(() => {
-      this.hud.hint.textContent = "Find the parmesan before Alice does.";
-    }, 1400);
+      this.hud.toast.classList.add("hidden");
+    }, 1600);
   }
 
   private updateTheme(level: LevelDefinition): void {
@@ -1162,7 +1750,7 @@ export class MouseRace3D {
     const toCheese = this.cheese.position.clone().sub(this.player.position);
     toCheese.y = 0;
     const distance = toCheese.length();
-    const angle = Math.atan2(toCheese.x, toCheese.z) - this.playerHeading;
+    const angle = Math.atan2(-toCheese.x, -toCheese.z) - this.playerHeading;
     const normalized = Math.atan2(Math.sin(angle), Math.cos(angle));
 
     let label = "Straight ahead";
@@ -1171,45 +1759,8 @@ export class MouseRace3D {
     else if (normalized < -Math.PI / 3) label = "Turn right";
     else if (normalized < -Math.PI / 9) label = "Veer right";
 
-    this.hud.guide.textContent = `Cheese: ${label} · ${distance.toFixed(1)}m`;
-    this.hud.cat.textContent = this.catChasing ? "Cat: Chasing" : "Cat: Patrolling";
-    this.hud.cat.classList.toggle("alert", this.catChasing);
-  }
-
-  private updatePathMarkers(): void {
-    if (!this.maze?.pathMarkers.length) {
-      return;
-    }
-
-    const route = this.cheese.position.clone().sub(this.player.position);
-    route.y = 0;
-    const totalDistance = route.length();
-    if (totalDistance < 0.01) {
-      this.maze.pathMarkers.forEach((marker) => {
-        marker.visible = false;
-      });
-      return;
-    }
-
-    route.normalize();
-    const lateral = new THREE.Vector3(-route.z, 0, route.x);
-
-    this.maze.pathMarkers.forEach((marker, indexMarker) => {
-      const segment = Math.min(totalDistance - 0.8, 1.8 + indexMarker * 2.1);
-      if (segment <= 0.4) {
-        marker.visible = false;
-        return;
-      }
-
-      const sway = ((indexMarker % 2 === 0 ? -1 : 1) * 0.35) + Math.sin(performance.now() * 0.002 + indexMarker) * 0.08;
-      marker.visible = true;
-      marker.position.set(
-        this.player.position.x + route.x * segment + lateral.x * sway,
-        0.05,
-        this.player.position.z + route.z * segment + lateral.z * sway,
-      );
-      (marker.material as THREE.MeshStandardMaterial).opacity = Math.max(0.2, 0.62 - indexMarker * 0.08);
-    });
+    this.lastGuideLabel = label;
+    this.lastDistanceText = distance.toFixed(1);
   }
 
   private getStateSnapshot(): Record<string, unknown> {
@@ -1220,7 +1771,7 @@ export class MouseRace3D {
       title: level?.title ?? "n/a",
       lives: this.lives,
       crumbs: this.crumbs,
-      extraLifeIn: 3 - this.extraLifeBank,
+      extraLifeIn: 6 - this.extraLifeBank,
       overlayOpen: this.isOverlayOpen(),
       levelComplete: this.levelComplete,
       won: this.hasWonGame,
@@ -1239,12 +1790,11 @@ export class MouseRace3D {
       },
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
-      visibleTrailMarkers: this.maze?.pathMarkers.filter((marker) => marker.visible).length ?? 0,
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
       catMode: this.catChasing ? "chasing" : "patrolling",
-      guide: this.hud.guide.textContent,
-      hint: this.hud.hint.textContent,
+      guide: `${this.lastGuideLabel} · ${this.lastDistanceText}m`,
+      toast: this.hud.toast.classList.contains("hidden") ? "" : this.hud.toast.textContent,
     };
   }
 
