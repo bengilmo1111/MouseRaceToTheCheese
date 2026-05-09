@@ -288,7 +288,7 @@ input {
 }
 
 .touch-btn.arrow {
-  font-size: 28px;
+  font-size: 20px;
 }
 
 .touch-btn.active,
@@ -329,5 +329,74 @@ input {
 
   .screen-card p {
     font-size: 18px;
+  }
+}
+
+#playtest-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 25;
+  width: min(360px, calc(100vw - 28px));
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px;
+  border: 3px solid rgba(64, 42, 12, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 251, 241, 0.88);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 24px rgba(66, 45, 17, 0.14);
+}
+
+.playtest-title {
+  margin-bottom: 10px;
+  color: #6b4218;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.playtest-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.playtest-btn {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #68411a;
+  color: #fff8ec;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.playtest-btn:hover {
+  background: #ff9b48;
+}
+
+#playtest-state {
+  margin: 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(81, 53, 19, 0.08);
+  color: #4c3517;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  #playtest-panel {
+    left: 12px;
+    right: 12px;
+    bottom: 108px;
+    width: auto;
+    max-height: 28vh;
   }
 }

@@ -57,14 +57,40 @@
         </div>
         <div id="touch-controls">
           <div class="touch-stack left">
-            <button id="touch-up" class="touch-btn arrow" type="button">▲</button>
+            <button id="touch-up" class="touch-btn arrow" type="button">UP</button>
             <div class="touch-row">
-              <button id="touch-left" class="touch-btn arrow" type="button">◀</button>
-              <button id="touch-down" class="touch-btn arrow" type="button">▼</button>
-              <button id="touch-right" class="touch-btn arrow" type="button">▶</button>
+              <button id="touch-left" class="touch-btn arrow" type="button">LT</button>
+              <button id="touch-down" class="touch-btn arrow" type="button">DN</button>
+              <button id="touch-right" class="touch-btn arrow" type="button">RT</button>
             </div>
           </div>
         </div>
+        <aside id="playtest-panel">
+          <div class="playtest-title">Playtest</div>
+          <div class="playtest-group">
+            <button id="ptest-start" class="playtest-btn" type="button">Start</button>
+            <button id="ptest-continue" class="playtest-btn" type="button">Continue</button>
+            <button id="ptest-reset" class="playtest-btn" type="button">Reset</button>
+          </div>
+          <div class="playtest-group">
+            <button id="ptest-up" class="playtest-btn" type="button">Step Up</button>
+            <button id="ptest-left" class="playtest-btn" type="button">Step Left</button>
+            <button id="ptest-down" class="playtest-btn" type="button">Step Down</button>
+            <button id="ptest-right" class="playtest-btn" type="button">Step Right</button>
+          </div>
+          <div class="playtest-group">
+            <button id="ptest-crumb" class="playtest-btn" type="button">Warp Crumb</button>
+            <button id="ptest-gem" class="playtest-btn" type="button">Warp Gem</button>
+            <button id="ptest-trap" class="playtest-btn" type="button">Warp Trap</button>
+            <button id="ptest-cheese" class="playtest-btn" type="button">Warp Cheese</button>
+          </div>
+          <div class="playtest-group">
+            <button id="ptest-cat" class="playtest-btn" type="button">Warp Cat</button>
+            <button id="ptest-alice" class="playtest-btn" type="button">Alice 95%</button>
+            <button id="ptest-hit" class="playtest-btn" type="button">Lose Life</button>
+          </div>
+          <pre id="playtest-state"></pre>
+        </aside>
       </div>
     </div>
   </body>

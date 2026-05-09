@@ -70,6 +70,10 @@ export class MouseRace3D {
   private aliceElapsedMs = 0;
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
+  private playtestTick = 0;
+  private playerHeading = Math.PI;
+  private cameraYaw = Math.PI;
+  private catChasing = false;
 
   private maze!: MazeState;
   private player!: THREE.Group;
@@ -93,6 +97,9 @@ export class MouseRace3D {
     body: this.must<HTMLParagraphElement>("overlay-body"),
     button: this.must<HTMLButtonElement>("overlay-btn"),
   };
+  private readonly playtest = {
+    state: this.must<HTMLPreElement>("playtest-state"),
+  };
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -103,6 +110,7 @@ export class MouseRace3D {
 
     this.buildSceneShell();
     this.bindUi();
+    this.bindPlaytestUi();
     this.resize();
     this.animate();
 
@@ -217,6 +225,26 @@ export class MouseRace3D {
     });
   }
 
+  private bindPlaytestUi(): void {
+    this.must<HTMLButtonElement>("ptest-start").addEventListener("click", () => this.startRun(true));
+    this.must<HTMLButtonElement>("ptest-continue").addEventListener("click", () => this.advanceOverlayFlow());
+    this.must<HTMLButtonElement>("ptest-reset").addEventListener("click", () => this.startRun(false));
+    this.must<HTMLButtonElement>("ptest-up").addEventListener("click", () => this.stepMove("up"));
+    this.must<HTMLButtonElement>("ptest-down").addEventListener("click", () => this.stepMove("down"));
+    this.must<HTMLButtonElement>("ptest-left").addEventListener("click", () => this.stepMove("left"));
+    this.must<HTMLButtonElement>("ptest-right").addEventListener("click", () => this.stepMove("right"));
+    this.must<HTMLButtonElement>("ptest-crumb").addEventListener("click", () => this.warpToPickup("crumb"));
+    this.must<HTMLButtonElement>("ptest-gem").addEventListener("click", () => this.warpToPickup("gem"));
+    this.must<HTMLButtonElement>("ptest-trap").addEventListener("click", () => this.warpToHazard("trap"));
+    this.must<HTMLButtonElement>("ptest-cheese").addEventListener("click", () => this.warpToCheese());
+    this.must<HTMLButtonElement>("ptest-cat").addEventListener("click", () => this.warpToCat());
+    this.must<HTMLButtonElement>("ptest-alice").addEventListener("click", () => {
+      this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * 0.95;
+      this.updatePlaytestState();
+    });
+    this.must<HTMLButtonElement>("ptest-hit").addEventListener("click", () => this.triggerHazard("Forced playtest hit."));
+  }
+
   private startRun(fromStartScreen: boolean): void {
     if (fromStartScreen) {
       this.startScreen.classList.add("hidden");
@@ -250,6 +278,9 @@ export class MouseRace3D {
     this.player.position.copy(this.maze.startPoint);
     this.cat.position.copy(this.maze.catPoint);
     this.cheese.position.copy(this.maze.cheesePoint);
+    this.playerHeading = Math.PI;
+    this.cameraYaw = Math.PI;
+    this.catChasing = false;
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
     this.refreshHud();
@@ -410,6 +441,20 @@ export class MouseRace3D {
     outerRing.position.y = -0.1;
     group.add(outerRing);
 
+    const aliceLane = new THREE.Mesh(
+      new THREE.TorusGeometry(Math.max(width, depth) * 0.57, 0.12, 10, 72),
+      new THREE.MeshStandardMaterial({
+        color: level.theme.accent,
+        emissive: level.theme.accent,
+        emissiveIntensity: 0.2,
+        transparent: true,
+        opacity: 0.45,
+      }),
+    );
+    aliceLane.rotation.x = Math.PI / 2;
+    aliceLane.position.y = 0.02;
+    group.add(aliceLane);
+
     return {
       walls,
       crumbs,
@@ -521,6 +566,32 @@ export class MouseRace3D {
       group.add(bubble);
     }
 
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.24, 4.8, 10, 1, true),
+      new THREE.MeshStandardMaterial({
+        color: 0xfff1a7,
+        emissive: 0xffc84e,
+        emissiveIntensity: 0.45,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+      }),
+    );
+    beacon.position.y = 2.4;
+    group.add(beacon);
+
+    const goalRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.94, 0.08, 10, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0xffd04f,
+        emissive: 0xffc84e,
+        emissiveIntensity: 0.4,
+      }),
+    );
+    goalRing.rotation.x = Math.PI / 2;
+    goalRing.position.y = 0.08;
+    group.add(goalRing);
+
     return group;
   }
 
@@ -565,8 +636,81 @@ export class MouseRace3D {
       this.updateCamera(delta);
     }
 
+    this.playtestTick += 1;
+    if (this.playtestTick % 5 === 0) {
+      this.updatePlaytestState();
+    }
+
     this.renderer.render(this.scene, this.camera);
   };
+
+  private stepMove(direction: ControlKey): void {
+    if (!this.maze || this.isOverlayOpen()) {
+      return;
+    }
+
+    const delta = new THREE.Vector3();
+    if (direction === "up") delta.set(0, 0, -0.7);
+    if (direction === "down") delta.set(0, 0, 0.7);
+    if (direction === "left") delta.set(-0.7, 0, 0);
+    if (direction === "right") delta.set(0.7, 0, 0);
+
+    this.moveWithCollisions(this.player.position, PLAYER_RADIUS, delta);
+    if (delta.lengthSq() > 0) {
+      this.playerHeading = Math.atan2(delta.x, delta.z);
+      this.player.rotation.y = this.playerHeading;
+    }
+    this.updatePickups(0);
+    this.updatePlaytestState();
+  }
+
+  private warpToPickup(kind: "crumb" | "gem"): void {
+    if (!this.maze) {
+      return;
+    }
+
+    const pool = kind === "crumb" ? this.maze.crumbs : this.maze.gems;
+    const target = pool.find((item) => item.active);
+    if (!target) {
+      this.flashHint(`No active ${kind} found.`);
+      return;
+    }
+
+    this.player.position.set(target.position.x, 0.3, target.position.z);
+    this.updatePickups(0);
+    this.updatePlaytestState();
+  }
+
+  private warpToHazard(kind: "trap"): void {
+    if (!this.maze) {
+      return;
+    }
+
+    const target = kind === "trap" ? this.maze.traps[0] : undefined;
+    if (!target) {
+      return;
+    }
+
+    this.player.position.set(target.position.x, 0.3, target.position.z);
+    this.updatePickups(0);
+    this.updatePlaytestState();
+  }
+
+  private warpToCheese(): void {
+    if (!this.maze) {
+      return;
+    }
+
+    this.player.position.set(this.cheese.position.x, 0.3, this.cheese.position.z);
+    this.updatePickups(0);
+    this.updatePlaytestState();
+  }
+
+  private warpToCat(): void {
+    this.player.position.set(this.cat.position.x, 0.3, this.cat.position.z);
+    this.updateCat(0);
+    this.updatePlaytestState();
+  }
 
   private updatePlayer(delta: number): void {
     const moveX = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
@@ -581,8 +725,8 @@ export class MouseRace3D {
     this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
 
     if (this.playerVelocity.lengthSq() > 0) {
-      const heading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
-      this.player.rotation.y = heading;
+      this.playerHeading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
+      this.player.rotation.y = this.playerHeading;
     }
 
     const bob = Math.sin(performance.now() * 0.01) * 0.03;
@@ -629,17 +773,28 @@ export class MouseRace3D {
       return;
     }
 
-    const target = patrol[this.catPatrolIndex];
+    const playerVector = this.player.position.clone().sub(this.cat.position);
+    playerVector.y = 0;
+    const playerDistance = playerVector.length();
+    const shouldChase = playerDistance < 6.4;
+
+    if (shouldChase !== this.catChasing) {
+      this.catChasing = shouldChase;
+      this.flashHint(shouldChase ? "The cat spotted you. Keep moving." : "The cat lost sight of you.");
+    }
+
+    const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
     const vector = target.clone().sub(this.cat.position);
     vector.y = 0;
     const distance = vector.length();
 
-    if (distance < 0.15) {
+    if (!shouldChase && distance < 0.15) {
       this.catPatrolIndex = (this.catPatrolIndex + 1) % patrol.length;
       return;
     }
 
-    vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * delta);
+    const speedScale = shouldChase ? 1.38 : 1;
+    vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(vector.x, vector.z);
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
@@ -738,13 +893,14 @@ export class MouseRace3D {
   }
 
   private updateCamera(_delta: number): void {
-    this.cameraTarget.set(
-      this.player.position.x,
-      this.player.position.y + 7.6,
-      this.player.position.z + 7.8,
-    );
+    this.cameraYaw = THREE.MathUtils.lerp(this.cameraYaw, this.playerHeading, 0.08);
+    const offsetX = -Math.sin(this.cameraYaw) * 5.8 + Math.cos(this.cameraYaw) * 2.1;
+    const offsetZ = -Math.cos(this.cameraYaw) * 5.8 - Math.sin(this.cameraYaw) * 2.1;
+    this.cameraTarget.set(this.player.position.x + offsetX, this.player.position.y + 6.2, this.player.position.z + offsetZ);
     this.camera.position.lerp(this.cameraTarget, 0.12);
-    this.camera.lookAt(this.player.position.x, this.player.position.y + 0.5, this.player.position.z - 1.4);
+    const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.6;
+    const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.6;
+    this.camera.lookAt(lookAheadX, this.player.position.y + 0.55, lookAheadZ);
   }
 
   private triggerHazard(message: string): void {
@@ -836,6 +992,9 @@ export class MouseRace3D {
     this.catPatrolIndex = 0;
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
+    this.catChasing = false;
+    this.playerHeading = Math.PI;
+    this.updatePlaytestState();
   }
 
   private refreshHud(): void {
@@ -860,6 +1019,43 @@ export class MouseRace3D {
     this.host.style.background = `linear-gradient(180deg, ${level.theme.skyTop} 0%, ${level.theme.skyBottom} 100%)`;
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
     this.scene.background = new THREE.Color(level.theme.skyBottom);
+  }
+
+  private getStateSnapshot(): Record<string, unknown> {
+    const level = LEVELS[this.levelIndex];
+    const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / level.aliceTimeMs) : 0;
+    return {
+      level: this.levelIndex + 1,
+      title: level?.title ?? "n/a",
+      lives: this.lives,
+      crumbs: this.crumbs,
+      extraLifeIn: 3 - this.extraLifeBank,
+      overlayOpen: this.isOverlayOpen(),
+      levelComplete: this.levelComplete,
+      won: this.hasWonGame,
+      player: {
+        x: Number(this.player.position.x.toFixed(2)),
+        z: Number(this.player.position.z.toFixed(2)),
+      },
+      cat: {
+        x: Number(this.cat.position.x.toFixed(2)),
+        z: Number(this.cat.position.z.toFixed(2)),
+      },
+      cheese: {
+        x: Number(this.cheese.position.x.toFixed(2)),
+        z: Number(this.cheese.position.z.toFixed(2)),
+      },
+      remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
+      remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
+      aliceProgress: Number(aliceProgress.toFixed(2)),
+      hint: this.hud.hint.textContent,
+    };
+  }
+
+  private updatePlaytestState(): void {
+    this.playtest.state.textContent = JSON.stringify(this.getStateSnapshot(), null, 2);
+    (window as Window & { render_game_to_text?: () => string }).render_game_to_text = () =>
+      JSON.stringify(this.getStateSnapshot());
   }
 
   private resize = (): void => {
