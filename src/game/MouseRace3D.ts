@@ -61,6 +61,7 @@ export class MouseRace3D {
   private bankAngle = 0;
   private pitchAngle = 0;
   private turnRate = 0;
+  private cameraShakeAmp = 0;
   private readonly controls: Record<ControlKey, boolean> = {
     up: false,
     down: false,
@@ -94,14 +95,13 @@ export class MouseRace3D {
 
   private readonly hud = {
     root: this.must<HTMLDivElement>("hud"),
-    level: this.must<HTMLDivElement>("hud-level"),
-    lives: this.must<HTMLDivElement>("hud-lives"),
-    crumbs: this.must<HTMLDivElement>("hud-crumbs"),
-    hint: this.must<HTMLDivElement>("hud-hint"),
-    guide: this.must<HTMLDivElement>("hud-guide"),
-    cat: this.must<HTMLDivElement>("hud-cat"),
+    status: this.must<HTMLDivElement>("hud-status"),
+    toast: this.must<HTMLDivElement>("hud-toast"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
   };
+  private lastGuideLabel = "";
+  private lastDistanceText = "";
+  private readonly pickupBursts: { mesh: THREE.Points; ageMs: number; lifeMs: number }[] = [];
 
   private readonly startScreen = this.must<HTMLDivElement>("start-screen");
   private readonly overlay = {
@@ -872,6 +872,8 @@ export class MouseRace3D {
       this.updateCamera(delta);
     }
 
+    this.updatePickupBursts(delta);
+
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
@@ -1043,7 +1045,7 @@ export class MouseRace3D {
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
-      this.flashHint(shouldChase ? "The cat spotted you. Keep moving." : "The cat lost sight of you.");
+      this.flashHint(shouldChase ? "Cat spotted you!" : "Cat lost you.", shouldChase);
     }
 
     const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
@@ -1079,10 +1081,9 @@ export class MouseRace3D {
         if (this.extraLifeBank >= 3) {
           this.extraLifeBank = 0;
           this.lives += 1;
-          this.flashHint("Three crumbs earned another life.");
-        } else {
-          this.flashHint("Crunch. More crumbs for your stash.");
+          this.flashHint("+1 life");
         }
+        this.spawnPickupBurst(crumb.position, 0xffe084);
         this.refreshHud();
       }
     }
@@ -1121,7 +1122,7 @@ export class MouseRace3D {
 
     this.gemCooldownUntil = performance.now() + 900;
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
-    this.flashHint("Zip. The teleport gem shifted the maze under you.");
+    this.flashHint("Teleported!");
   }
 
   private updateAlice(delta: number): void {
@@ -1183,6 +1184,13 @@ export class MouseRace3D {
     const targetFov = 52 + THREE.MathUtils.clamp(Math.abs(this.currentSpeed) * 0.6, 0, 6);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.08);
     this.camera.updateProjectionMatrix();
+
+    if (this.cameraShakeAmp > 0.002) {
+      this.camera.position.x += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.camera.position.y += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.camera.position.z += (Math.random() - 0.5) * this.cameraShakeAmp;
+      this.cameraShakeAmp *= 0.85;
+    }
   }
 
   private clampCameraDistance(sinH: number, cosH: number, baseDist: number): number {
@@ -1202,6 +1210,64 @@ export class MouseRace3D {
     return Math.max(2.6, maxDist);
   }
 
+  private spawnPickupBurst(at: THREE.Vector3, color: number): void {
+    const count = 14;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3 + 0] = at.x;
+      positions[i * 3 + 1] = at.y;
+      positions[i * 3 + 2] = at.z;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.6 + Math.random() * 1.4;
+      velocities[i * 3 + 0] = Math.cos(angle) * speed;
+      velocities[i * 3 + 1] = 1.2 + Math.random() * 1.8;
+      velocities[i * 3 + 2] = Math.sin(angle) * speed;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute("velocity", new THREE.BufferAttribute(velocities, 3));
+    const mat = new THREE.PointsMaterial({
+      color,
+      size: 0.14,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+    });
+    const points = new THREE.Points(geom, mat);
+    this.scene.add(points);
+    this.pickupBursts.push({ mesh: points, ageMs: 0, lifeMs: 600 });
+  }
+
+  private updatePickupBursts(delta: number): void {
+    if (this.pickupBursts.length === 0) return;
+    const dtMs = delta * 1000;
+    for (let i = this.pickupBursts.length - 1; i >= 0; i -= 1) {
+      const burst = this.pickupBursts[i];
+      burst.ageMs += dtMs;
+      const t = burst.ageMs / burst.lifeMs;
+      if (t >= 1) {
+        this.scene.remove(burst.mesh);
+        burst.mesh.geometry.dispose();
+        (burst.mesh.material as THREE.PointsMaterial).dispose();
+        this.pickupBursts.splice(i, 1);
+        continue;
+      }
+      const posAttr = burst.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const velAttr = burst.mesh.geometry.getAttribute("velocity") as THREE.BufferAttribute;
+      for (let p = 0; p < posAttr.count; p += 1) {
+        posAttr.setX(p, posAttr.getX(p) + velAttr.getX(p) * delta);
+        posAttr.setY(p, posAttr.getY(p) + velAttr.getY(p) * delta);
+        posAttr.setZ(p, posAttr.getZ(p) + velAttr.getZ(p) * delta);
+        velAttr.setY(p, velAttr.getY(p) - 6 * delta);
+      }
+      posAttr.needsUpdate = true;
+      const mat = burst.mesh.material as THREE.PointsMaterial;
+      mat.opacity = 1 - t;
+      mat.size = 0.14 * (1 - t * 0.5);
+    }
+  }
+
   private triggerHazard(message: string): void {
     if (performance.now() < this.hazardLockedUntil || this.isOverlayOpen()) {
       return;
@@ -1209,6 +1275,7 @@ export class MouseRace3D {
 
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
     this.lives -= 1;
+    this.cameraShakeAmp = 0.45;
     this.refreshHud();
 
     if (this.lives <= 0) {
@@ -1302,27 +1369,30 @@ export class MouseRace3D {
     this.bankAngle = 0;
     this.pitchAngle = 0;
     this.player.position.y = 0.3;
-    this.flashHint("Back to the start. Follow the glowing trail.");
     this.updatePlaytestState();
   }
 
   private refreshHud(): void {
     const level = LEVELS[this.levelIndex];
-    this.hud.level.textContent = `Level ${level.id}: ${level.title}`;
-    this.hud.level.style.color = level.theme.hud;
-    this.hud.lives.textContent = `Lives: ${this.lives}`;
-    this.hud.lives.style.color = level.theme.hud;
-    this.hud.crumbs.textContent = `Crumbs: ${this.crumbs}  Next life in: ${3 - this.extraLifeBank}`;
-    this.hud.crumbs.style.color = level.theme.hud;
+    const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, 3 - this.lives));
+    this.hud.status.innerHTML =
+      `<span class="level">L${level.id} · ${level.title}</span>` +
+      `<span class="sep">·</span>` +
+      `<span class="hearts">${hearts}</span>` +
+      `<span class="sep">·</span>` +
+      `<span>🧀 ${this.crumbs}</span>`;
+    this.hud.status.style.color = level.theme.hud;
     this.updateGuidanceHud();
   }
 
-  private flashHint(text: string): void {
-    this.hud.hint.textContent = text;
+  private flashHint(text: string, alert = false): void {
+    this.hud.toast.textContent = text;
+    this.hud.toast.classList.toggle("alert", alert);
+    this.hud.toast.classList.remove("hidden");
     window.clearTimeout(this.currentHintTimeout);
     this.currentHintTimeout = window.setTimeout(() => {
-      this.hud.hint.textContent = "Find the parmesan before Alice does.";
-    }, 1400);
+      this.hud.toast.classList.add("hidden");
+    }, 1600);
   }
 
   private updateTheme(level: LevelDefinition): void {
@@ -1348,9 +1418,8 @@ export class MouseRace3D {
     else if (normalized < -Math.PI / 3) label = "Turn right";
     else if (normalized < -Math.PI / 9) label = "Veer right";
 
-    this.hud.guide.textContent = `Cheese: ${label} · ${distance.toFixed(1)}m`;
-    this.hud.cat.textContent = this.catChasing ? "Cat: Chasing" : "Cat: Patrolling";
-    this.hud.cat.classList.toggle("alert", this.catChasing);
+    this.lastGuideLabel = label;
+    this.lastDistanceText = distance.toFixed(1);
   }
 
   private updatePathMarkers(): void {
@@ -1420,8 +1489,8 @@ export class MouseRace3D {
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
       catMode: this.catChasing ? "chasing" : "patrolling",
-      guide: this.hud.guide.textContent,
-      hint: this.hud.hint.textContent,
+      guide: `${this.lastGuideLabel} · ${this.lastDistanceText}m`,
+      toast: this.hud.toast.classList.contains("hidden") ? "" : this.hud.toast.textContent,
     };
   }
 

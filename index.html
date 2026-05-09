@@ -19,20 +19,15 @@
         <div id="game-container"></div>
         <div id="hud" class="hidden">
           <div class="hud-left">
-            <div id="hud-level" class="hud-pill"></div>
-            <div id="hud-lives" class="hud-pill"></div>
-            <div id="hud-crumbs" class="hud-pill"></div>
+            <div id="hud-status" class="hud-pill"></div>
           </div>
           <div class="hud-center">
-            <div id="timer-label">Alice is coming</div>
             <div id="timer-track"><div id="timer-fill"></div></div>
-            <div id="hud-guide" class="hud-pill guide-pill"></div>
           </div>
           <div class="hud-right">
-            <button id="fullscreen-btn" class="hud-button" type="button">Full</button>
-            <div id="hud-cat" class="hud-pill cat-pill">Cat: Patrolling</div>
-            <div id="hud-hint" class="hud-hint">Find the parmesan before Alice does.</div>
+            <button id="fullscreen-btn" class="hud-button" type="button" aria-label="Toggle fullscreen">⛶</button>
           </div>
+          <div id="hud-toast" class="hud-toast hidden"></div>
         </div>
         <div id="start-screen" class="screen">
           <div class="screen-card hero-card">
