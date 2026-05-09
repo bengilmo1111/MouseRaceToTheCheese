@@ -1,11 +1,15 @@
 export type LevelTheme = {
   name: string;
+  skyTop: string;
+  skyBottom: string;
   floor: number;
   wallTop: number;
-  wallFace: number;
+  wallSide: number;
   accent: number;
+  hazard: number;
+  trim: number;
   hud: string;
-  shadow: number;
+  fog: number;
 };
 
 export type LevelDefinition = {
@@ -25,12 +29,16 @@ export const LEVELS: LevelDefinition[] = [
     catSpeed: 88,
     theme: {
       name: "Pantry",
+      skyTop: "#f7d487",
+      skyBottom: "#fff4d2",
       floor: 0xf7df93,
       wallTop: 0xe1a95f,
-      wallFace: 0xb87133,
+      wallSide: 0xb87133,
       accent: 0xffd84d,
+      hazard: 0xc85644,
+      trim: 0x8b5924,
       hud: "#7b4d15",
-      shadow: 0x7d5d2c,
+      fog: 0xfdebc0,
     },
     map: [
       "#############",
@@ -51,12 +59,16 @@ export const LEVELS: LevelDefinition[] = [
     catSpeed: 112,
     theme: {
       name: "Garden",
+      skyTop: "#9dd9ac",
+      skyBottom: "#e9ffd4",
       floor: 0xcfe89f,
       wallTop: 0x8bc16d,
-      wallFace: 0x4a8a46,
+      wallSide: 0x4a8a46,
       accent: 0x68d6ff,
+      hazard: 0xd15d44,
+      trim: 0x2f6b34,
       hud: "#275a2b",
-      shadow: 0x2d5c2b,
+      fog: 0xe9f7db,
     },
     map: [
       "#############",
@@ -77,12 +89,16 @@ export const LEVELS: LevelDefinition[] = [
     catSpeed: 126,
     theme: {
       name: "Attic",
+      skyTop: "#8093d8",
+      skyBottom: "#d9e4ff",
       floor: 0xbcd1ff,
       wallTop: 0x8d9ae3,
-      wallFace: 0x5865b6,
+      wallSide: 0x5865b6,
       accent: 0xfff08f,
+      hazard: 0xc5645e,
+      trim: 0x3a467f,
       hud: "#24316d",
-      shadow: 0x26345b,
+      fog: 0xdfe6ff,
     },
     map: [
       "#############",
