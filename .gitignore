@@ -3,3 +3,6 @@ dist/
 vite-*.log
 .playwright-mcp/
 pr-*.png
+3d-*.png
+playtest-*.png
+slice2-*.png
