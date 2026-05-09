@@ -87,6 +87,8 @@ export class MouseRace3D {
     lives: this.must<HTMLDivElement>("hud-lives"),
     crumbs: this.must<HTMLDivElement>("hud-crumbs"),
     hint: this.must<HTMLDivElement>("hud-hint"),
+    guide: this.must<HTMLDivElement>("hud-guide"),
+    cat: this.must<HTMLDivElement>("hud-cat"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
   };
 
@@ -639,6 +641,7 @@ export class MouseRace3D {
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
+      this.updateGuidanceHud();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -1005,6 +1008,7 @@ export class MouseRace3D {
     this.hud.lives.style.color = level.theme.hud;
     this.hud.crumbs.textContent = `Crumbs: ${this.crumbs}  Next life in: ${3 - this.extraLifeBank}`;
     this.hud.crumbs.style.color = level.theme.hud;
+    this.updateGuidanceHud();
   }
 
   private flashHint(text: string): void {
@@ -1019,6 +1023,28 @@ export class MouseRace3D {
     this.host.style.background = `linear-gradient(180deg, ${level.theme.skyTop} 0%, ${level.theme.skyBottom} 100%)`;
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
     this.scene.background = new THREE.Color(level.theme.skyBottom);
+  }
+
+  private updateGuidanceHud(): void {
+    if (!this.cheese || !this.player) {
+      return;
+    }
+
+    const toCheese = this.cheese.position.clone().sub(this.player.position);
+    toCheese.y = 0;
+    const distance = toCheese.length();
+    const angle = Math.atan2(toCheese.x, toCheese.z) - this.playerHeading;
+    const normalized = Math.atan2(Math.sin(angle), Math.cos(angle));
+
+    let label = "Straight ahead";
+    if (normalized > Math.PI / 3) label = "Turn left";
+    else if (normalized > Math.PI / 9) label = "Veer left";
+    else if (normalized < -Math.PI / 3) label = "Turn right";
+    else if (normalized < -Math.PI / 9) label = "Veer right";
+
+    this.hud.guide.textContent = `Cheese: ${label} · ${distance.toFixed(1)}m`;
+    this.hud.cat.textContent = this.catChasing ? "Cat: Chasing" : "Cat: Patrolling";
+    this.hud.cat.classList.toggle("alert", this.catChasing);
   }
 
   private getStateSnapshot(): Record<string, unknown> {
