@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { LEVELS, LevelDefinition } from "./levels";
+import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 
 type ControlKey = "up" | "down" | "left" | "right";
 
@@ -79,6 +80,8 @@ export class MouseRace3D {
   private cameraYaw = Math.PI;
   private catChasing = false;
 
+  private bgMusic: HTMLAudioElement;
+
   private maze!: MazeState;
   private player!: THREE.Group;
   private cat!: THREE.Group;
@@ -109,6 +112,9 @@ export class MouseRace3D {
 
   constructor(host: HTMLElement) {
     this.host = host;
+    this.bgMusic = new Audio(bgMusicUrl);
+    this.bgMusic.loop = true;
+    this.bgMusic.volume = 0.5;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -254,6 +260,10 @@ export class MouseRace3D {
   private startRun(fromStartScreen: boolean): void {
     if (fromStartScreen) {
       this.startScreen.classList.add("hidden");
+    }
+
+    if (this.bgMusic.paused) {
+      this.bgMusic.play().catch((e) => console.warn("Audio play failed", e));
     }
 
     this.hud.root.classList.remove("hidden");
