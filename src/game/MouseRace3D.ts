@@ -48,11 +48,10 @@ export class MouseRace3D {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly clock = new THREE.Clock();
   private readonly tileSize = 2.6;
-  private readonly moveSpeed = 4.8;
+  private readonly moveSpeed = 5.4;
+  private readonly turnSpeed = 2.8;
   private readonly hazardGraceMs = 1300;
   private readonly cameraTarget = new THREE.Vector3();
-  private readonly cameraForward = new THREE.Vector3();
-  private readonly cameraRight = new THREE.Vector3();
   private readonly movementDelta = new THREE.Vector3();
   private readonly playerVelocity = new THREE.Vector3();
   private readonly controls: Record<ControlKey, boolean> = {
@@ -75,8 +74,9 @@ export class MouseRace3D {
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
   private playtestTick = 0;
-  private playerHeading = Math.PI;
-  private cameraYaw = Math.PI;
+  private playerHeading = 0;
+  private cameraYaw = 0;
+  private cameraInitialized = false;
   private catChasing = false;
 
   private maze!: MazeState;
@@ -284,8 +284,10 @@ export class MouseRace3D {
     this.player.position.copy(this.maze.startPoint);
     this.cat.position.copy(this.maze.catPoint);
     this.cheese.position.copy(this.maze.cheesePoint);
-    this.playerHeading = Math.PI;
-    this.cameraYaw = Math.PI;
+    this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
+    this.cameraYaw = this.playerHeading;
+    this.player.rotation.y = this.playerHeading;
+    this.cameraInitialized = false;
     this.catChasing = false;
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
@@ -711,15 +713,17 @@ export class MouseRace3D {
       return;
     }
 
-    const strafeAmount = direction === "right" ? 1 : direction === "left" ? -1 : 0;
-    const forwardAmount = direction === "up" ? 1 : direction === "down" ? -1 : 0;
-    const delta = this.getCameraRelativeDelta(strafeAmount, forwardAmount, 0.7);
-
-    this.moveWithCollisions(this.player.position, PLAYER_RADIUS, delta);
-    if (delta.lengthSq() > 0) {
-      this.playerHeading = Math.atan2(delta.x, delta.z);
-      this.player.rotation.y = this.playerHeading;
+    if (direction === "left" || direction === "right") {
+      this.playerHeading -= (direction === "right" ? 1 : -1) * 0.45;
+    } else {
+      const sign = direction === "up" ? 1 : -1;
+      const dx = -Math.sin(this.playerHeading) * sign * 0.7;
+      const dz = -Math.cos(this.playerHeading) * sign * 0.7;
+      this.movementDelta.set(dx, 0, dz);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.movementDelta);
     }
+
+    this.player.rotation.y = this.playerHeading;
     this.updatePickups(0);
     this.updatePlaytestState();
   }
@@ -773,41 +777,37 @@ export class MouseRace3D {
   }
 
   private updatePlayer(delta: number): void {
-    const strafeAmount = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
-    const forwardAmount = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
-    this.playerVelocity.copy(this.getCameraRelativeDelta(strafeAmount, forwardAmount, 1));
+    const turnInput = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
+    const forwardInput = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
 
-    if (this.playerVelocity.lengthSq() > 1) {
-      this.playerVelocity.normalize();
+    if (turnInput !== 0) {
+      this.playerHeading -= turnInput * this.turnSpeed * delta;
     }
 
-    this.playerVelocity.multiplyScalar(this.moveSpeed * delta);
-    this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
-
-    if (this.playerVelocity.lengthSq() > 0) {
-      this.playerHeading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
-      this.player.rotation.y = this.playerHeading;
+    if (forwardInput !== 0) {
+      const forwardX = -Math.sin(this.playerHeading);
+      const forwardZ = -Math.cos(this.playerHeading);
+      const speed = this.moveSpeed * (forwardInput < 0 ? 0.6 : 1);
+      this.playerVelocity.set(forwardX * forwardInput, 0, forwardZ * forwardInput);
+      this.playerVelocity.multiplyScalar(speed * delta);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
+    } else {
+      this.playerVelocity.set(0, 0, 0);
     }
 
-    const bob = Math.sin(performance.now() * 0.01) * 0.03;
+    this.player.rotation.y = this.playerHeading;
+    const moving = forwardInput !== 0;
+    const bob = moving ? Math.sin(performance.now() * 0.014) * 0.04 : 0;
     this.player.position.y = 0.3 + bob;
   }
 
-  private getCameraRelativeDelta(strafeAmount: number, forwardAmount: number, scale: number): THREE.Vector3 {
-    this.camera.getWorldDirection(this.cameraForward);
-    this.cameraForward.y = 0;
-    if (this.cameraForward.lengthSq() === 0) {
-      this.cameraForward.set(0, 0, -1);
-    } else {
-      this.cameraForward.normalize();
+  private headingFromTo(from: THREE.Vector3, to: THREE.Vector3): number {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    if (dx === 0 && dz === 0) {
+      return 0;
     }
-
-    this.cameraRight.crossVectors(this.cameraForward, THREE.Object3D.DEFAULT_UP).normalize();
-    return this.movementDelta
-      .copy(this.cameraForward)
-      .multiplyScalar(forwardAmount)
-      .addScaledVector(this.cameraRight, strafeAmount)
-      .multiplyScalar(scale);
+    return Math.atan2(-dx, -dz);
   }
 
   private moveWithCollisions(position: THREE.Vector3, radius: number, delta: THREE.Vector3): void {
@@ -873,7 +873,7 @@ export class MouseRace3D {
     const speedScale = shouldChase ? 1.38 : 1;
     vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
-    this.cat.rotation.y = Math.atan2(vector.x, vector.z);
+    this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
 
     if (this.player.position.distanceToSquared(this.cat.position) < 1.1 * 1.1) {
@@ -970,14 +970,26 @@ export class MouseRace3D {
   }
 
   private updateCamera(_delta: number): void {
-    this.cameraYaw = THREE.MathUtils.lerp(this.cameraYaw, this.playerHeading, 0.08);
-    const offsetX = -Math.sin(this.cameraYaw) * 6.6;
-    const offsetZ = -Math.cos(this.cameraYaw) * 6.6;
-    this.cameraTarget.set(this.player.position.x + offsetX, this.player.position.y + 6.2, this.player.position.z + offsetZ);
-    this.camera.position.lerp(this.cameraTarget, 0.12);
-    const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.9;
-    const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.9;
-    this.camera.lookAt(lookAheadX, this.player.position.y + 0.55, lookAheadZ);
+    this.cameraYaw = this.playerHeading;
+    const dist = 5.4;
+    const height = 3.2;
+    const sinH = Math.sin(this.cameraYaw);
+    const cosH = Math.cos(this.cameraYaw);
+    const desiredX = this.player.position.x + sinH * dist;
+    const desiredZ = this.player.position.z + cosH * dist;
+    const desiredY = this.player.position.y + height;
+    this.cameraTarget.set(desiredX, desiredY, desiredZ);
+
+    if (!this.cameraInitialized) {
+      this.camera.position.copy(this.cameraTarget);
+      this.cameraInitialized = true;
+    } else {
+      this.camera.position.lerp(this.cameraTarget, 0.25);
+    }
+
+    const lookX = this.player.position.x - sinH * 1.8;
+    const lookZ = this.player.position.z - cosH * 1.8;
+    this.camera.lookAt(lookX, this.player.position.y + 0.5, lookZ);
   }
 
   private triggerHazard(message: string): void {
@@ -1070,8 +1082,10 @@ export class MouseRace3D {
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
     this.catChasing = false;
-    this.playerHeading = Math.PI;
-    this.cameraYaw = Math.PI;
+    this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
+    this.cameraYaw = this.playerHeading;
+    this.player.rotation.y = this.playerHeading;
+    this.cameraInitialized = false;
     this.player.position.y = 0.3;
     this.flashHint("Back to the start. Follow the glowing trail.");
     this.updatePlaytestState();
@@ -1110,7 +1124,7 @@ export class MouseRace3D {
     const toCheese = this.cheese.position.clone().sub(this.player.position);
     toCheese.y = 0;
     const distance = toCheese.length();
-    const angle = Math.atan2(toCheese.x, toCheese.z) - this.playerHeading;
+    const angle = Math.atan2(-toCheese.x, -toCheese.z) - this.playerHeading;
     const normalized = Math.atan2(Math.sin(angle), Math.cos(angle));
 
     let label = "Straight ahead";
