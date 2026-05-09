@@ -88,6 +88,13 @@ export class MouseRace3D {
 
   private maze!: MazeState;
   private player!: THREE.Group;
+  private mouseParts!: {
+    earL: THREE.Object3D;
+    earR: THREE.Object3D;
+    tail: THREE.Object3D;
+    eyeL: THREE.Object3D;
+    eyeR: THREE.Object3D;
+  };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
   private alice!: THREE.Group;
@@ -529,96 +536,166 @@ export class MouseRace3D {
 
   private buildMouse(): THREE.Group {
     const group = new THREE.Group();
-    const fur = new THREE.MeshStandardMaterial({ color: 0xb9b3c0, roughness: 0.78, metalness: 0.02 });
-    const bellyMat = new THREE.MeshStandardMaterial({ color: 0xefe7ec, roughness: 0.85 });
-    const earOuter = new THREE.MeshStandardMaterial({ color: 0xb9b3c0, roughness: 0.78 });
+    const fur = new THREE.MeshStandardMaterial({ color: 0xc4bdc9, roughness: 0.78 });
+    const bellyMat = new THREE.MeshStandardMaterial({ color: 0xf6eef3, roughness: 0.85 });
     const earInner = new THREE.MeshStandardMaterial({ color: 0xf6b9cf, roughness: 0.55 });
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0x121012, roughness: 0.25 });
+    const sclera = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.28 });
+    const pupil = new THREE.MeshStandardMaterial({ color: 0x141114, roughness: 0.2 });
+    const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const noseMat = new THREE.MeshStandardMaterial({ color: 0xff7aa0, roughness: 0.35, emissive: 0x661022, emissiveIntensity: 0.3 });
+    const blushMat = new THREE.MeshStandardMaterial({ color: 0xff9bbf, roughness: 0.7, transparent: true, opacity: 0.55 });
     const pawMat = new THREE.MeshStandardMaterial({ color: 0xf3a8c0, roughness: 0.6 });
+    const mouthMat = new THREE.MeshStandardMaterial({ color: 0x3a2228, roughness: 0.4 });
     const whiskerMat = new THREE.LineBasicMaterial({ color: 0x2a2530, transparent: true, opacity: 0.55 });
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0xeea3b8, roughness: 0.5 });
 
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 22, 22), fur);
-    body.scale.set(1.05, 0.86, 1.55);
-    body.position.y = 0.04;
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.45, 22, 22), fur);
+    body.scale.set(1.08, 0.94, 1.45);
+    body.position.y = 0.06;
     body.castShadow = true;
     group.add(body);
 
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 18), bellyMat);
-    belly.scale.set(0.9, 0.7, 1.4);
-    belly.position.set(0, -0.1, 0);
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 18), bellyMat);
+    belly.scale.set(0.9, 0.7, 1.32);
+    belly.position.set(0, -0.08, 0.02);
     group.add(belly);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 18), fur);
-    head.position.set(0, 0.16, -0.5);
-    head.scale.set(1, 0.95, 1.05);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 22, 22), fur);
+    head.position.set(0, 0.22, -0.52);
+    head.scale.set(1.08, 1.02, 1.05);
     head.castShadow = true;
     group.add(head);
 
-    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 14), bellyMat);
-    snout.scale.set(0.9, 0.7, 1.1);
-    snout.position.set(0, 0.07, -0.74);
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 14), bellyMat);
+    snout.scale.set(0.95, 0.72, 1.1);
+    snout.position.set(0, 0.08, -0.82);
     group.add(snout);
 
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), noseMat);
-    nose.position.set(0, 0.07, -0.86);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), noseMat);
+    nose.position.set(0, 0.11, -0.95);
     group.add(nose);
 
+    const mouth = new THREE.Mesh(
+      new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI),
+      mouthMat,
+    );
+    mouth.rotation.set(0, 0, Math.PI);
+    mouth.position.set(0, 0.0, -0.9);
+    group.add(mouth);
+
+    const buildEye = (side: number): THREE.Group => {
+      const eyeGroup = new THREE.Group();
+      eyeGroup.position.set(side * 0.14, 0.28, -0.74);
+      const white = new THREE.Mesh(new THREE.SphereGeometry(0.078, 16, 16), sclera);
+      white.scale.set(1, 1, 0.65);
+      eyeGroup.add(white);
+      const dark = new THREE.Mesh(new THREE.SphereGeometry(0.058, 14, 14), pupil);
+      dark.position.set(side * -0.008, -0.006, -0.04);
+      dark.scale.set(0.95, 1.05, 0.45);
+      eyeGroup.add(dark);
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), shineMat);
+      shine.position.set(side * -0.022, 0.022, -0.07);
+      eyeGroup.add(shine);
+      return eyeGroup;
+    };
+
+    const eyeL = buildEye(-1);
+    const eyeR = buildEye(1);
+    group.add(eyeL, eyeR);
+
     for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 12), eyeMat);
-      eye.position.set(side * 0.12, 0.21, -0.66);
-      group.add(eye);
+      const blush = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), blushMat);
+      blush.scale.set(1, 0.45, 0.5);
+      blush.position.set(side * 0.24, 0.1, -0.74);
+      group.add(blush);
+    }
 
-      const earBase = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), earOuter);
-      earBase.scale.set(1, 0.35, 1);
-      earBase.position.set(side * 0.18, 0.42, -0.46);
-      earBase.rotation.set(0, 0, side * 0.2);
-      earBase.castShadow = true;
-      group.add(earBase);
+    const buildEar = (side: number): THREE.Group => {
+      const earGroup = new THREE.Group();
+      earGroup.position.set(side * 0.22, 0.46, -0.5);
+      const outer = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), fur);
+      outer.scale.set(0.98, 0.4, 1);
+      outer.castShadow = true;
+      earGroup.add(outer);
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), earInner);
+      inner.scale.set(0.9, 0.28, 0.95);
+      inner.position.y = 0.04;
+      earGroup.add(inner);
+      earGroup.rotation.z = side * 0.16;
+      return earGroup;
+    };
 
-      const earInside = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 14), earInner);
-      earInside.scale.set(1, 0.28, 1);
-      earInside.position.set(side * 0.18, 0.46, -0.45);
-      earInside.rotation.set(0, 0, side * 0.2);
-      group.add(earInside);
+    const earL = buildEar(-1);
+    const earR = buildEar(1);
+    group.add(earL, earR);
 
-      const frontPaw = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), pawMat);
-      frontPaw.scale.set(1, 0.6, 1.2);
-      frontPaw.position.set(side * 0.18, -0.2, -0.32);
+    for (const side of [-1, 1]) {
+      const frontPaw = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), pawMat);
+      frontPaw.scale.set(1, 0.55, 1.2);
+      frontPaw.position.set(side * 0.18, -0.24, -0.32);
       group.add(frontPaw);
 
-      const backPaw = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), pawMat);
-      backPaw.scale.set(1, 0.6, 1.3);
-      backPaw.position.set(side * 0.22, -0.22, 0.28);
+      const backPaw = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), pawMat);
+      backPaw.scale.set(1, 0.55, 1.3);
+      backPaw.position.set(side * 0.22, -0.26, 0.28);
       group.add(backPaw);
 
       const whiskerGeom = new THREE.BufferGeometry();
-      const wx = side * 0.13;
+      const wx = side * 0.14;
       const verts: number[] = [];
       for (let row = 0; row < 3; row += 1) {
-        const angle = (row - 1) * 0.18;
-        verts.push(wx, 0.06 + (row - 1) * 0.04, -0.78);
-        verts.push(side * (0.13 + 0.36 * Math.cos(angle)), 0.06 + (row - 1) * 0.05, -0.78 - 0.32 * Math.sin(angle) - 0.05);
+        const angle = (row - 1) * 0.2;
+        verts.push(wx, 0.04 + (row - 1) * 0.05, -0.86);
+        verts.push(side * (0.14 + 0.42 * Math.cos(angle)), 0.04 + (row - 1) * 0.06, -0.86 - 0.34 * Math.sin(angle) - 0.05);
       }
       whiskerGeom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
       const whiskers = new THREE.LineSegments(whiskerGeom, whiskerMat);
       group.add(whiskers);
     }
 
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(0, 0.02, 0.55);
     const tailCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, -0.04, 0.5),
-      new THREE.Vector3(0.05, 0.05, 0.78),
-      new THREE.Vector3(-0.05, 0.18, 1.0),
-      new THREE.Vector3(0.04, 0.32, 1.18),
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0.05, 0.08, 0.26),
+      new THREE.Vector3(-0.05, 0.22, 0.5),
+      new THREE.Vector3(0.04, 0.36, 0.7),
     ]);
-    const tail = new THREE.Mesh(
-      new THREE.TubeGeometry(tailCurve, 24, 0.045, 8, false),
-      new THREE.MeshStandardMaterial({ color: 0xeea3b8, roughness: 0.5 }),
-    );
+    const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.05, 8, false), tailMat);
     tail.castShadow = true;
-    group.add(tail);
+    tailGroup.add(tail);
+    group.add(tailGroup);
 
+    this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
     return group;
+  }
+
+  private animateMouse(): void {
+    if (!this.mouseParts) return;
+    const t = performance.now();
+
+    const idleWag = Math.sin(t * 0.006) * 0.18;
+    const turnWag = THREE.MathUtils.clamp(-this.turnRate * 0.18, -0.6, 0.6);
+    const speedFactor = 1 + Math.min(1.5, Math.abs(this.currentSpeed) * 0.18);
+    this.mouseParts.tail.rotation.z = (idleWag + turnWag) * speedFactor;
+    this.mouseParts.tail.rotation.y = Math.sin(t * 0.0072 + 0.7) * 0.1 * speedFactor;
+
+    const earBase = 0.16;
+    const twitch = Math.sin(t * 0.011) * 0.06 + (Math.sin(t * 0.0017) > 0.97 ? 0.18 : 0);
+    this.mouseParts.earL.rotation.z = -earBase + twitch;
+    this.mouseParts.earR.rotation.z = earBase - twitch;
+    this.mouseParts.earL.rotation.x = Math.sin(t * 0.009) * 0.05;
+    this.mouseParts.earR.rotation.x = Math.sin(t * 0.009 + 0.4) * 0.05;
+
+    const blinkPeriod = 3600;
+    const phase = (t % blinkPeriod) / blinkPeriod;
+    let blink = 0;
+    if (phase > 0.94) {
+      blink = Math.sin((phase - 0.94) / 0.06 * Math.PI);
+    }
+    const eyeY = 1 - blink * 0.92;
+    this.mouseParts.eyeL.scale.y = eyeY;
+    this.mouseParts.eyeR.scale.y = eyeY;
   }
 
   private buildCat(): THREE.Group {
@@ -911,6 +988,7 @@ export class MouseRace3D {
     }
 
     this.updatePickupBursts(delta);
+    this.animateMouse();
 
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
