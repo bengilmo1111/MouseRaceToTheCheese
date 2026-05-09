@@ -46,7 +46,7 @@ export class MouseRace3D {
   private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly clock = new THREE.Clock();
-  private readonly tileSize = 3.9;
+  private readonly tileSize = 2.6;
   private readonly moveSpeed = 6.0;
   private readonly accel = 18;
   private readonly decel = 12;
@@ -1111,7 +1111,7 @@ export class MouseRace3D {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
       crumb.mesh.rotation.y += 0.03;
-      if (this.player.position.distanceToSquared(crumb.position) < 1.0 * 1.0) {
+      if (this.player.position.distanceToSquared(crumb.position) < 0.85 * 0.85) {
         crumb.active = false;
         crumb.mesh.visible = false;
         this.crumbs += 1;
@@ -1127,7 +1127,7 @@ export class MouseRace3D {
     }
 
     for (const trap of this.maze.traps) {
-      if (this.player.position.distanceToSquared(trap.position) < 0.85 * 0.85) {
+      if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
         this.triggerHazard("A mousetrap snapped shut!");
       }
     }
@@ -1136,13 +1136,13 @@ export class MouseRace3D {
       if (!gem.active) continue;
       gem.mesh.rotation.y += 0.04;
       gem.mesh.position.y = 0.55 + Math.sin(performance.now() * 0.004 + gem.position.x) * 0.08;
-      if (this.player.position.distanceToSquared(gem.position) < 1.05 * 1.05) {
+      if (this.player.position.distanceToSquared(gem.position) < 0.95 * 0.95) {
         this.teleportFromGem(gem);
       }
     }
 
     this.cheese.rotation.y += 0.02;
-    if (this.player.position.distanceToSquared(this.cheese.position) < 1.2 * 1.2) {
+    if (this.player.position.distanceToSquared(this.cheese.position) < 1.0 * 1.0) {
       this.completeLevel();
     }
   }
