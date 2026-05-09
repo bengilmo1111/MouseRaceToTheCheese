@@ -750,10 +750,24 @@ export class MouseRace3D {
   }
 
   private updatePlayer(delta: number): void {
-    const moveX = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
-    const moveZ = (this.controls.down ? 1 : 0) - (this.controls.up ? 1 : 0);
+    const strafeAmount = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
+    const forwardAmount = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
 
-    this.playerVelocity.set(moveX, 0, moveZ);
+    const cameraForward = new THREE.Vector3();
+    this.camera.getWorldDirection(cameraForward);
+    cameraForward.y = 0;
+    if (cameraForward.lengthSq() === 0) {
+      cameraForward.set(0, 0, -1);
+    } else {
+      cameraForward.normalize();
+    }
+
+    const cameraRight = new THREE.Vector3().crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+    this.playerVelocity
+      .copy(cameraForward.multiplyScalar(forwardAmount))
+      .add(cameraRight.multiplyScalar(strafeAmount));
+
     if (this.playerVelocity.lengthSq() > 1) {
       this.playerVelocity.normalize();
     }
@@ -931,12 +945,12 @@ export class MouseRace3D {
 
   private updateCamera(_delta: number): void {
     this.cameraYaw = THREE.MathUtils.lerp(this.cameraYaw, this.playerHeading, 0.08);
-    const offsetX = -Math.sin(this.cameraYaw) * 5.8 + Math.cos(this.cameraYaw) * 2.1;
-    const offsetZ = -Math.cos(this.cameraYaw) * 5.8 - Math.sin(this.cameraYaw) * 2.1;
+    const offsetX = -Math.sin(this.cameraYaw) * 6.6;
+    const offsetZ = -Math.cos(this.cameraYaw) * 6.6;
     this.cameraTarget.set(this.player.position.x + offsetX, this.player.position.y + 6.2, this.player.position.z + offsetZ);
     this.camera.position.lerp(this.cameraTarget, 0.12);
-    const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.6;
-    const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.6;
+    const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.9;
+    const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.9;
     this.camera.lookAt(lookAheadX, this.player.position.y + 0.55, lookAheadZ);
   }
 
