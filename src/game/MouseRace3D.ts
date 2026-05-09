@@ -1275,7 +1275,7 @@ export class MouseRace3D {
     const playerVector = this.player.position.clone().sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
-    const chaseRange = this.levelIndex === 0 ? 4.2 : this.levelIndex === 1 ? 5.4 : 6.0;
+    const chaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
     const shouldChase = playerDistance < chaseRange;
 
     if (shouldChase !== this.catChasing) {
@@ -1316,7 +1316,7 @@ export class MouseRace3D {
         crumb.mesh.visible = false;
         this.crumbs += 1;
         this.extraLifeBank += 1;
-        if (this.extraLifeBank >= 3) {
+        if (this.extraLifeBank >= 6) {
           this.extraLifeBank = 0;
           this.lives += 1;
           this.flashHint("+1 life");
@@ -1701,7 +1701,7 @@ export class MouseRace3D {
       title: level?.title ?? "n/a",
       lives: this.lives,
       crumbs: this.crumbs,
-      extraLifeIn: 3 - this.extraLifeBank,
+      extraLifeIn: 6 - this.extraLifeBank,
       overlayOpen: this.isOverlayOpen(),
       levelComplete: this.levelComplete,
       won: this.hasWonGame,
