@@ -20,6 +20,7 @@ export class GameScene extends Phaser.Scene {
   private crumbs = 0;
   private extraLifeBank = 0;
   private hasWonGame = false;
+  private hasSeenIntro = false;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<"W" | "A" | "S" | "D", Phaser.Input.Keyboard.Key>;
@@ -50,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private timerBar!: Phaser.GameObjects.Rectangle;
   private timerFrame!: Phaser.GameObjects.Rectangle;
   private aliceMarker!: Phaser.GameObjects.Container;
+  private fullscreenButton!: Phaser.GameObjects.Container;
   private playerEars?: Phaser.GameObjects.Container;
   private catTail?: Phaser.GameObjects.Rectangle;
 
@@ -78,6 +80,7 @@ export class GameScene extends Phaser.Scene {
     this.buildTouchControls();
     this.buildOverlay();
     this.loadLevel(this.levelIndex);
+    this.showIntro();
   }
 
   update(_: number, delta: number): void {
@@ -140,6 +143,28 @@ export class GameScene extends Phaser.Scene {
     const handLeft = this.add.rectangle(-16, 8, 10, 6, 0xffd6d6, 1);
     const handRight = this.add.rectangle(16, 8, 10, 6, 0xffd6d6, 1);
     this.aliceMarker.add([body, head, handLeft, handRight]);
+
+    const buttonBg = this.add.rectangle(this.scale.width - 68, 64, 100, 36, 0xffffff, 0.86);
+    buttonBg.setStrokeStyle(4, 0xc98a2d);
+    const buttonText = this.add.text(this.scale.width - 68, 64, "FULL", {
+      fontFamily: fontFamily,
+      fontSize: "18px",
+      color: "#7b4d15",
+      fontStyle: "bold",
+    });
+    buttonText.setOrigin(0.5);
+
+    this.fullscreenButton = this.add.container(0, 0, [buttonBg, buttonText]);
+    this.fullscreenButton.setSize(100, 36);
+    this.fullscreenButton.setInteractive(
+      new Phaser.Geom.Rectangle(this.scale.width - 118, 46, 100, 36),
+      Phaser.Geom.Rectangle.Contains,
+    );
+    this.fullscreenButton.on("pointerup", () => {
+      this.scale.toggleFullscreen();
+      buttonBg.setFillStyle(0xffd76c, 0.96);
+      this.time.delayedCall(160, () => buttonBg.setFillStyle(0xffffff, 0.86));
+    });
   }
 
   private buildTouchControls(): void {
@@ -603,6 +628,19 @@ export class GameScene extends Phaser.Scene {
     this.extraLifeBank = 0;
     this.hasWonGame = false;
     this.loadLevel(this.levelIndex);
+    this.showIntro();
+  }
+
+  private showIntro(): void {
+    if (this.hasSeenIntro) {
+      return;
+    }
+
+    this.hasSeenIntro = true;
+    this.showOverlay(
+      "Race To The Cheese",
+      "You are a brave mouse.\nUse arrow keys, WASD, or the big touch buttons.\nGrab crumbs, dodge traps, beat the cat, and reach the parmesan before Alice does.\n\nTap or press SPACE to start.",
+    );
   }
 
   private showOverlay(title: string, body: string): void {
