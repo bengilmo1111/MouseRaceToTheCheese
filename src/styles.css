@@ -64,10 +64,16 @@ input {
   display: none !important;
 }
 
-.hud-left,
-.hud-right {
+.hud-left {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+
+.hud-right {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
   gap: 8px;
 }
 

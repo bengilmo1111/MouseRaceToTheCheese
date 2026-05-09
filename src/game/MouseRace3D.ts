@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { LEVELS, LevelDefinition } from "./levels";
+import { AudioBus } from "./audio";
+
+const MUTE_KEY = "mouseRace.muted";
 
 type ControlKey = "up" | "down" | "left" | "right";
 
@@ -61,6 +64,8 @@ export class MouseRace3D {
   private pitchAngle = 0;
   private turnRate = 0;
   private cameraShakeAmp = 0;
+  private footstepAccum = 0;
+  private readonly audio = new AudioBus();
   private readonly controls: Record<ControlKey, boolean> = {
     up: false,
     down: false,
@@ -127,6 +132,7 @@ export class MouseRace3D {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.host.appendChild(this.renderer.domElement);
 
+    this.audio.setMuted(localStorage.getItem(MUTE_KEY) === "1");
     this.buildSceneShell();
     this.bindUi();
     this.bindPlaytestUi();
@@ -210,6 +216,19 @@ export class MouseRace3D {
       } else {
         void this.host.requestFullscreen();
       }
+    });
+
+    const muteBtn = this.must<HTMLButtonElement>("mute-btn");
+    const refreshMuteIcon = (): void => {
+      muteBtn.textContent = this.audio.isMuted() ? "🔇" : "🔊";
+    };
+    refreshMuteIcon();
+    muteBtn.addEventListener("click", () => {
+      this.audio.resume();
+      const next = !this.audio.isMuted();
+      this.audio.setMuted(next);
+      localStorage.setItem(MUTE_KEY, next ? "1" : "0");
+      refreshMuteIcon();
     });
 
     window.addEventListener("keydown", (event) => {
@@ -307,6 +326,7 @@ export class MouseRace3D {
     if (fromStartScreen) {
       this.startScreen.classList.add("hidden");
     }
+    this.audio.resume();
 
     this.hud.root.classList.remove("hidden");
     this.levelIndex = 0;
@@ -345,6 +365,7 @@ export class MouseRace3D {
     this.turnRate = 0;
     this.bankAngle = 0;
     this.pitchAngle = 0;
+    this.footstepAccum = 0;
     this.catChasing = false;
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
@@ -1089,6 +1110,17 @@ export class MouseRace3D {
       const forwardZ = -Math.cos(this.playerHeading);
       this.playerVelocity.set(forwardX * this.currentSpeed * delta, 0, forwardZ * this.currentSpeed * delta);
       this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
+      if (Math.abs(this.currentSpeed) > 0.4) {
+        this.footstepAccum += Math.abs(this.currentSpeed) * delta;
+        if (this.footstepAccum >= 0.45) {
+          this.footstepAccum = 0;
+          this.audio.tickFootstep();
+        }
+      } else {
+        this.footstepAccum = 0;
+      }
+    } else {
+      this.footstepAccum = 0;
     }
 
     const targetBank = THREE.MathUtils.clamp(-this.turnRate * 0.25, -0.35, 0.35);
@@ -1162,6 +1194,8 @@ export class MouseRace3D {
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
       this.flashHint(shouldChase ? "Cat spotted you!" : "Cat lost you.", shouldChase);
+      if (shouldChase) this.audio.playCatAlert();
+      else this.audio.playCatLost();
     }
 
     const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
@@ -1198,6 +1232,9 @@ export class MouseRace3D {
           this.extraLifeBank = 0;
           this.lives += 1;
           this.flashHint("+1 life");
+          this.audio.playLifeUp();
+        } else {
+          this.audio.playCrumb();
         }
         this.spawnPickupBurst(crumb.position, 0xffe084);
         this.refreshHud();
@@ -1206,6 +1243,7 @@ export class MouseRace3D {
 
     for (const trap of this.maze.traps) {
       if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
+        this.audio.playTrap();
         this.triggerHazard("A mousetrap snapped shut!");
       }
     }
@@ -1238,6 +1276,7 @@ export class MouseRace3D {
     this.gemCooldownUntil = performance.now() + 900;
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
     this.flashHint("Teleported!");
+    this.audio.playGem();
   }
 
   private updateAlice(delta: number): void {
@@ -1391,9 +1430,11 @@ export class MouseRace3D {
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
     this.lives -= 1;
     this.cameraShakeAmp = 0.45;
+    this.audio.playHazard();
     this.refreshHud();
 
     if (this.lives <= 0) {
+      this.audio.playGameOver();
       this.showOverlay("Game Over", `${message}\nAlice wins this race. Try again from the first maze.`);
       return;
     }
@@ -1407,6 +1448,7 @@ export class MouseRace3D {
     }
 
     this.levelComplete = true;
+    this.audio.playLevelComplete();
     if (this.levelIndex === LEVELS.length - 1) {
       this.hasWonGame = true;
       this.showOverlay(
@@ -1483,6 +1525,7 @@ export class MouseRace3D {
     this.turnRate = 0;
     this.bankAngle = 0;
     this.pitchAngle = 0;
+    this.footstepAccum = 0;
     this.player.position.y = 0.3;
     this.updatePlaytestState();
   }
