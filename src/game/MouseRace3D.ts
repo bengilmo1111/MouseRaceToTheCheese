@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { LEVELS, LevelDefinition } from "./levels";
+import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
@@ -93,6 +94,8 @@ export class MouseRace3D {
   private cameraInitialized = false;
   private catChasing = false;
 
+  private bgMusic: HTMLAudioElement;
+
   private maze!: MazeState;
   private player!: THREE.Group;
   private mouseParts!: {
@@ -130,6 +133,9 @@ export class MouseRace3D {
 
   constructor(host: HTMLElement) {
     this.host = host;
+    this.bgMusic = new Audio(bgMusicUrl);
+    this.bgMusic.loop = true;
+    this.bgMusic.volume = 0.5;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -333,6 +339,10 @@ export class MouseRace3D {
       this.startScreen.classList.add("hidden");
     }
     this.audio.resume();
+
+    if (this.bgMusic.paused) {
+      this.bgMusic.play().catch((e) => console.warn("Audio play failed", e));
+    }
 
     this.hud.root.classList.remove("hidden");
     this.levelIndex = 0;
