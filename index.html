@@ -19,20 +19,17 @@
         <div id="game-container"></div>
         <div id="hud" class="hidden">
           <div class="hud-left">
-            <div id="hud-level" class="hud-pill"></div>
-            <div id="hud-lives" class="hud-pill"></div>
-            <div id="hud-crumbs" class="hud-pill"></div>
+            <div id="hud-status" class="hud-pill"></div>
           </div>
           <div class="hud-center">
-            <div id="timer-label">Alice is coming</div>
             <div id="timer-track"><div id="timer-fill"></div></div>
-            <div id="hud-guide" class="hud-pill guide-pill"></div>
           </div>
           <div class="hud-right">
-            <button id="fullscreen-btn" class="hud-button" type="button">Full</button>
-            <div id="hud-cat" class="hud-pill cat-pill">Cat: Patrolling</div>
-            <div id="hud-hint" class="hud-hint">Find the parmesan before Alice does.</div>
+            <button id="mute-btn" class="hud-button" type="button" aria-label="Toggle sound">🔊</button>
+            <button id="fullscreen-btn" class="hud-button" type="button" aria-label="Toggle fullscreen">⛶</button>
           </div>
+          <div id="hud-toast" class="hud-toast hidden"></div>
+          <div id="vignette" class="vignette"></div>
         </div>
         <div id="start-screen" class="screen">
           <div class="screen-card hero-card">
@@ -43,8 +40,9 @@
               and reach the parmesan before Alice crawls in from outside.
             </p>
             <div class="hero-notes">
-              <span>Keyboard: WASD or arrows</span>
-              <span>Touch: hold the big movement pads</span>
+              <span>Up/Down (W/S or ↑/↓): forward & back</span>
+              <span>Left/Right (A/D or ←/→): turn the mouse</span>
+              <span>Touch: hold the movement pads</span>
               <span>Each 3 crumbs earns 1 extra life</span>
             </div>
             <button id="start-btn" class="primary-btn" type="button">Start Race</button>
@@ -67,7 +65,7 @@
             </div>
           </div>
         </div>
-        <aside id="playtest-panel">
+        <aside id="playtest-panel" class="hidden">
           <div class="playtest-title">Playtest</div>
           <div class="playtest-group">
             <button id="ptest-start" class="playtest-btn" type="button">Start</button>
