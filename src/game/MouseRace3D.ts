@@ -29,6 +29,7 @@ type MazeState = {
   walls: WallRect[];
   crumbs: MazePickup[];
   traps: MazeHazard[];
+  trapGlows: THREE.Mesh[];
   gems: MazePickup[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
@@ -64,6 +65,7 @@ export class MouseRace3D {
   private pitchAngle = 0;
   private turnRate = 0;
   private cameraShakeAmp = 0;
+  private paused = false;
   private footstepAccum = 0;
   private readonly audio = new AudioBus();
   private readonly controls: Record<ControlKey, boolean> = {
@@ -108,6 +110,7 @@ export class MouseRace3D {
     root: this.must<HTMLDivElement>("hud"),
     status: this.must<HTMLDivElement>("hud-status"),
     toast: this.must<HTMLDivElement>("hud-toast"),
+    vignette: this.must<HTMLDivElement>("vignette"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
   };
   private lastGuideLabel = "";
@@ -240,6 +243,9 @@ export class MouseRace3D {
         event.preventDefault();
         this.advanceOverlayFlow();
       }
+      if (event.code === "Escape") {
+        this.togglePause();
+      }
     });
 
     window.addEventListener("keyup", (event) => {
@@ -367,6 +373,7 @@ export class MouseRace3D {
     this.pitchAngle = 0;
     this.footstepAccum = 0;
     this.catChasing = false;
+    this.hud.vignette.classList.remove("active");
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
     this.refreshHud();
@@ -377,6 +384,7 @@ export class MouseRace3D {
     const walls: WallRect[] = [];
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
+    const trapGlows: THREE.Mesh[] = [];
     const gems: MazePickup[] = [];
     const patrol: THREE.Vector3[] = [];
 
@@ -458,6 +466,21 @@ export class MouseRace3D {
           trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone() });
+
+          const glow = new THREE.Mesh(
+            new THREE.RingGeometry(0.55, 0.95, 32),
+            new THREE.MeshBasicMaterial({
+              color: 0xff5a3a,
+              transparent: true,
+              opacity: 0.35,
+              side: THREE.DoubleSide,
+              depthWrite: false,
+            }),
+          );
+          glow.rotation.x = -Math.PI / 2;
+          glow.position.set(x, 0.012, z);
+          group.add(glow);
+          trapGlows.push(glow);
           return;
         }
 
@@ -543,6 +566,7 @@ export class MouseRace3D {
       walls,
       crumbs,
       traps,
+      trapGlows,
       gems,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
@@ -998,7 +1022,7 @@ export class MouseRace3D {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
-    if (!this.isOverlayOpen() && this.maze) {
+    if (!this.isOverlayOpen() && !this.paused && this.maze) {
       this.updatePlayer(delta);
       this.updateCat(delta);
       this.updatePickups(delta);
@@ -1196,6 +1220,7 @@ export class MouseRace3D {
       this.flashHint(shouldChase ? "Cat spotted you!" : "Cat lost you.", shouldChase);
       if (shouldChase) this.audio.playCatAlert();
       else this.audio.playCatLost();
+      this.hud.vignette.classList.toggle("active", shouldChase);
     }
 
     const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
@@ -1245,6 +1270,16 @@ export class MouseRace3D {
       if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
         this.audio.playTrap();
         this.triggerHazard("A mousetrap snapped shut!");
+      }
+    }
+
+    if (this.maze.trapGlows.length) {
+      const t = performance.now() * 0.004;
+      const pulse = 0.5 + Math.sin(t) * 0.5;
+      const scale = 0.9 + pulse * 0.18;
+      for (const glow of this.maze.trapGlows) {
+        glow.scale.set(scale, scale, scale);
+        (glow.material as THREE.MeshBasicMaterial).opacity = 0.22 + pulse * 0.28;
       }
     }
 
@@ -1516,6 +1551,7 @@ export class MouseRace3D {
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
     this.catChasing = false;
+    this.hud.vignette.classList.remove("active");
     this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
     this.cameraYaw = this.playerHeading;
     this.player.rotation.y = this.playerHeading;
@@ -1541,6 +1577,20 @@ export class MouseRace3D {
       `<span>🧀 ${this.crumbs}</span>`;
     this.hud.status.style.color = level.theme.hud;
     this.updateGuidanceHud();
+  }
+
+  private togglePause(): void {
+    if (!this.startScreen.classList.contains("hidden")) return;
+    if (!this.overlay.root.classList.contains("hidden")) return;
+    this.paused = !this.paused;
+    if (this.paused) {
+      window.clearTimeout(this.currentHintTimeout);
+      this.hud.toast.textContent = "Paused — Esc to resume";
+      this.hud.toast.classList.remove("alert");
+      this.hud.toast.classList.remove("hidden");
+    } else {
+      this.hud.toast.classList.add("hidden");
+    }
   }
 
   private flashHint(text: string, alert = false): void {

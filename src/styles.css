@@ -175,6 +175,26 @@ input {
   display: block !important;
 }
 
+.vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(160, 24, 12, 0.55) 100%);
+  z-index: 8;
+}
+
+.vignette.active {
+  opacity: 1;
+  animation: vignette-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes vignette-pulse {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
 .hud-toast.alert {
   background: rgba(120, 32, 18, 0.86);
   border-color: rgba(255, 154, 134, 0.5);

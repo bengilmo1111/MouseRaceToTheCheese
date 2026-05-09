@@ -111,7 +111,8 @@ export class AudioBus {
   }
 
   playCrumb(): void {
-    this.tone("sine", 620, 920, 0.09, 0.22, 0.005, 0.01);
+    const wobble = 1 + (Math.random() - 0.5) * 0.32;
+    this.tone("sine", 620 * wobble, 920 * wobble, 0.09, 0.22, 0.005, 0.01);
   }
 
   playLifeUp(): void {
