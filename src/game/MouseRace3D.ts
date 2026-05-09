@@ -79,8 +79,10 @@ export class MouseRace3D {
   private playerHeading = Math.PI;
   private cameraYaw = Math.PI;
   private catChasing = false;
+  private cameraShakeAmount = 0;
 
   private bgMusic: HTMLAudioElement;
+  private audioCtx?: AudioContext;
 
   private maze!: MazeState;
   private player!: THREE.Group;
@@ -797,6 +799,9 @@ export class MouseRace3D {
     if (this.playerVelocity.lengthSq() > 0) {
       this.playerHeading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
       this.player.rotation.y = this.playerHeading;
+      this.player.rotation.z = Math.sin(performance.now() * 0.015) * 0.15;
+    } else {
+      this.player.rotation.z = THREE.MathUtils.lerp(this.player.rotation.z, 0, 0.2);
     }
 
     const bob = Math.sin(performance.now() * 0.01) * 0.03;
@@ -884,6 +889,7 @@ export class MouseRace3D {
     vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(vector.x, vector.z);
+    this.cat.rotation.z = Math.sin(performance.now() * 0.012) * 0.15;
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
 
     if (this.player.position.distanceToSquared(this.cat.position) < 1.1 * 1.1) {
@@ -900,9 +906,12 @@ export class MouseRace3D {
         crumb.mesh.visible = false;
         this.crumbs += 1;
         this.extraLifeBank += 1;
+        this.playTone(800 + Math.random() * 200, "sine", 0.1, 0.15);
         if (this.extraLifeBank >= 3) {
           this.extraLifeBank = 0;
           this.lives += 1;
+          this.playTone(600, "square", 0.1, 0.2);
+          setTimeout(() => this.playTone(900, "square", 0.3, 0.2), 100);
           this.flashHint("Three crumbs earned another life.");
         } else {
           this.flashHint("Crunch. More crumbs for your stash.");
@@ -945,7 +954,32 @@ export class MouseRace3D {
 
     this.gemCooldownUntil = performance.now() + 900;
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
+    this.cameraShakeAmount = 0.2;
+    this.playTone(600, "triangle", 0.1, 0.2);
+    setTimeout(() => this.playTone(1200, "triangle", 0.3, 0.2), 100);
     this.flashHint("Zip. The teleport gem shifted the maze under you.");
+  }
+
+  private playTone(frequency: number, type: OscillatorType, duration: number, volume: number = 0.1): void {
+    if (!this.audioCtx) {
+      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (this.audioCtx.state === "suspended") {
+      void this.audioCtx.resume();
+    }
+    const osc = this.audioCtx.createOscillator();
+    const gain = this.audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, this.audioCtx.currentTime);
+    
+    gain.gain.setValueAtTime(volume, this.audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + duration);
+    
+    osc.connect(gain);
+    gain.connect(this.audioCtx.destination);
+    
+    osc.start();
+    osc.stop(this.audioCtx.currentTime + duration);
   }
 
   private updateAlice(delta: number): void {
@@ -979,7 +1013,7 @@ export class MouseRace3D {
     this.alice.lookAt(this.cheese.position.x, 0.2, this.cheese.position.z);
   }
 
-  private updateCamera(_delta: number): void {
+  private updateCamera(delta: number): void {
     this.cameraYaw = THREE.MathUtils.lerp(this.cameraYaw, this.playerHeading, 0.08);
     const offsetX = -Math.sin(this.cameraYaw) * 6.6;
     const offsetZ = -Math.cos(this.cameraYaw) * 6.6;
@@ -988,6 +1022,12 @@ export class MouseRace3D {
     const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.9;
     const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.9;
     this.camera.lookAt(lookAheadX, this.player.position.y + 0.55, lookAheadZ);
+    
+    if (this.cameraShakeAmount > 0) {
+      this.camera.position.x += (Math.random() - 0.5) * this.cameraShakeAmount;
+      this.camera.position.z += (Math.random() - 0.5) * this.cameraShakeAmount;
+      this.cameraShakeAmount = Math.max(0, this.cameraShakeAmount - delta * 2.0);
+    }
   }
 
   private triggerHazard(message: string): void {
@@ -995,6 +1035,8 @@ export class MouseRace3D {
       return;
     }
 
+    this.playTone(150, "sawtooth", 0.4, 0.3);
+    this.cameraShakeAmount = 0.5;
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
     this.lives -= 1;
     this.refreshHud();
