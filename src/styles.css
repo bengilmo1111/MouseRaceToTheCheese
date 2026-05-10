@@ -550,7 +550,7 @@ input {
 
 @media (pointer: coarse), (max-width: 900px) {
   .touch-pad {
-    bottom: max(82px, calc(env(safe-area-inset-bottom, 0px) + 82px));
+    bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 12px));
   }
 }
 
@@ -571,7 +571,7 @@ input {
 
 @media (max-height: 520px) {
   .touch-pad {
-    bottom: max(54px, calc(env(safe-area-inset-bottom, 0px) + 54px));
+    bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px));
     padding: 8px;
     gap: 7px;
   }
