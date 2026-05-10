@@ -140,6 +140,7 @@ export class MouseRace3D {
   private scoutPeeks = 0;
   private scoutCrumbBank = 0;
   private scoutPeekUntil = 0;
+  private wasScoutPeekActive = false;
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
   private playtestTick = 0;
@@ -475,6 +476,7 @@ export class MouseRace3D {
     this.scoutPeeks = 1;
     this.scoutCrumbBank = 0;
     this.scoutPeekUntil = 0;
+    this.wasScoutPeekActive = false;
     this.hasWonGame = false;
     this.hasSeenIntro = false;
     this.loadLevel(0);
@@ -491,6 +493,7 @@ export class MouseRace3D {
     this.collectedCheeseKeys = 0;
     this.scoutPeeks = Math.min(MAX_SCOUT_PEEKS, Math.max(this.scoutPeeks, 1));
     this.scoutPeekUntil = 0;
+    this.wasScoutPeekActive = false;
 
     if (this.maze) {
       this.scene.remove(this.maze.levelGroup);
@@ -851,7 +854,19 @@ export class MouseRace3D {
     tailGroup.add(tail);
     group.add(tailGroup);
 
-    group.add(this.createWorldMarker("YOU", 0xffffff, 0x4f3414, 1.35));
+    const playerHalo = new THREE.Mesh(
+      new THREE.RingGeometry(0.56, 0.78, 36),
+      new THREE.MeshBasicMaterial({
+        color: 0x4fc3ff,
+        transparent: true,
+        opacity: 0.58,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    playerHalo.rotation.x = -Math.PI / 2;
+    playerHalo.position.y = -0.27;
+    group.add(playerHalo);
 
     this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
     return group;
@@ -1687,6 +1702,8 @@ export class MouseRace3D {
 
     this.scoutPeeks -= 1;
     this.scoutPeekUntil = performance.now() + SCOUT_PEEK_DURATION_MS;
+    this.cameraInitialized = false;
+    this.wasScoutPeekActive = true;
     this.currentSpeed = 0;
     this.targetSpeed = 0;
     this.flashHint("Scout peek: the race pauses while you look for keys and cheese.");
@@ -1711,14 +1728,31 @@ export class MouseRace3D {
   }
 
   private updateScoutCamera(): void {
+    this.wasScoutPeekActive = true;
     this.cameraYaw = 0;
-    const scoutHeight = Math.max(this.maze.mazeWidth, this.maze.mazeDepth) * 0.9;
-    this.cameraTarget.set(this.maze.mazeCenter.x, scoutHeight, this.maze.mazeCenter.z + 0.01);
+    const targetFov = 68;
+    const verticalFovRad = THREE.MathUtils.degToRad(targetFov);
+    const horizontalFovRad = 2 * Math.atan(Math.tan(verticalFovRad / 2) * this.camera.aspect);
+    const limitingFov = Math.max(THREE.MathUtils.degToRad(24), Math.min(verticalFovRad, horizontalFovRad));
+    const mazeRadius = Math.hypot(this.maze.mazeWidth, this.maze.mazeDepth) * 0.5;
+    const scoutDistance = Math.max(mazeRadius / Math.sin(limitingFov / 2), mazeRadius * 1.35);
+    const scoutDirection = new THREE.Vector3(0, 1, 0.32).normalize();
+
+    this.cameraTarget.copy(this.maze.mazeCenter).addScaledVector(scoutDirection, scoutDistance);
     this.camera.position.lerp(this.cameraTarget, this.cameraInitialized ? 0.18 : 1);
     this.cameraInitialized = true;
+    this.camera.up.set(0, 1, 0);
     this.camera.lookAt(this.maze.mazeCenter.x, 0, this.maze.mazeCenter.z);
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 64, 0.14);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.14);
+    this.camera.far = Math.max(600, scoutDistance + mazeRadius + 60);
     this.camera.updateProjectionMatrix();
+
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.Fog) {
+      fog.near = Math.max(30, scoutDistance - mazeRadius * 0.25);
+      fog.far = scoutDistance + mazeRadius + 80;
+    }
+
     this.refreshScoutButton();
   }
 
@@ -1728,7 +1762,19 @@ export class MouseRace3D {
       return;
     }
 
+    if (this.wasScoutPeekActive) {
+      this.cameraInitialized = false;
+      this.wasScoutPeekActive = false;
+    }
+
     this.cameraYaw = this.playerHeading;
+    this.camera.up.set(0, 1, 0);
+    this.camera.far = 300;
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.Fog) {
+      fog.near = 18;
+      fog.far = 52;
+    }
     const baseDist = 5.4;
     const height = 3.0;
     const sinH = Math.sin(this.cameraYaw);
