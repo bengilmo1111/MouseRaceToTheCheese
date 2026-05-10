@@ -25,6 +25,7 @@
             <div id="timer-track"><div id="timer-fill"></div></div>
           </div>
           <div class="hud-right">
+            <button id="scout-btn" class="hud-button" type="button" aria-label="Use scout view">🔭1</button>
             <button id="mute-btn" class="hud-button" type="button" aria-label="Toggle sound">🔊</button>
             <button id="fullscreen-btn" class="hud-button" type="button" aria-label="Toggle fullscreen">⛶</button>
           </div>
@@ -36,29 +37,30 @@
             <div class="hero-badge">3D Maze Race</div>
             <h1>Mouse Race To The Cheese</h1>
             <p>
-              Sprint through sprawling mazes, collect every cheese key, use paired teleport gems,
+              Start in kid-friendly mazes that feel playful first: collect just enough keys, use paired teleport gems,
               dodge traps, slip past the cat, and reach the parmesan before Alice crawls in from outside.
             </p>
             <div class="difficulty-picker" aria-label="Difficulty level">
-              <button class="difficulty-btn" type="button" data-difficulty="easy" aria-pressed="false">
-                <strong>Easy</strong>
-                <span>Slow cat · long Alice timer</span>
+              <button class="difficulty-btn active" type="button" data-difficulty="easy" aria-pressed="true">
+                <strong>Kid</strong>
+                <span>1 key · no life lost on bumps</span>
               </button>
               <button class="difficulty-btn" type="button" data-difficulty="medium" aria-pressed="false">
                 <strong>Medium</strong>
-                <span>Balanced chase</span>
+                <span>2 keys · gentler chase</span>
               </button>
-              <button class="difficulty-btn active" type="button" data-difficulty="hard" aria-pressed="true">
+              <button class="difficulty-btn" type="button" data-difficulty="hard" aria-pressed="false">
                 <strong>Hard</strong>
-                <span>3–5 minute maze timer</span>
+                <span>All keys · full challenge</span>
               </button>
             </div>
             <div class="hero-notes">
               <span>Up/Down (W/S or ↑/↓): forward & back</span>
               <span>Left/Right (A/D or ←/→): turn the mouse</span>
               <span>Touch: hold the movement pads</span>
-              <span>Each 3 crumbs earns 1 extra life</span>
-              <span>Collect all keys before the cheese unlocks</span>
+              <span>Scout view: press M or 🔭 to zoom up</span>
+              <span>Kid mode: 2 crumbs earn 1 extra life</span>
+              <span>Key goals grow from Kid to Hard</span>
               <span>Teleport gems now come in working pairs</span>
             </div>
             <button id="start-btn" class="primary-btn" type="button">Start Race</button>

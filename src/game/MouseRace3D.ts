@@ -14,6 +14,10 @@ type DifficultySettings = {
   catSpeedMultiplier: number;
   aliceTimeMultiplier: number;
   chaseRangeMultiplier: number;
+  startingLives: number;
+  extraLifeCrumbs: number;
+  requiredKeyLimit?: number;
+  forgivingHits: boolean;
 };
 
 type WallRect = {
@@ -54,26 +58,39 @@ type MazeState = {
 
 const PLAYER_RADIUS = 0.42;
 const CAT_RADIUS = 0.5;
-const EXTRA_LIFE_CRUMBS = 3;
-const DEFAULT_DIFFICULTY: DifficultyKey = "hard";
+const SCOUT_PEEK_DURATION_MS = 6000;
+const SCOUT_CRUMBS_PER_CHARGE = 5;
+const MAX_SCOUT_PEEKS = 3;
+const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
 const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
   easy: {
-    label: "Easy",
-    catSpeedMultiplier: 0.55,
-    aliceTimeMultiplier: 1.75,
-    chaseRangeMultiplier: 0.82,
+    label: "Kid",
+    catSpeedMultiplier: 0.38,
+    aliceTimeMultiplier: 2.6,
+    chaseRangeMultiplier: 0.68,
+    startingLives: 5,
+    extraLifeCrumbs: 2,
+    requiredKeyLimit: 1,
+    forgivingHits: true,
   },
   medium: {
     label: "Medium",
-    catSpeedMultiplier: 0.78,
-    aliceTimeMultiplier: 1.3,
-    chaseRangeMultiplier: 0.92,
+    catSpeedMultiplier: 0.72,
+    aliceTimeMultiplier: 1.45,
+    chaseRangeMultiplier: 0.9,
+    startingLives: 4,
+    extraLifeCrumbs: 3,
+    requiredKeyLimit: 2,
+    forgivingHits: false,
   },
   hard: {
     label: "Hard",
     catSpeedMultiplier: 1,
     aliceTimeMultiplier: 1,
     chaseRangeMultiplier: 1,
+    startingLives: 3,
+    extraLifeCrumbs: 3,
+    forgivingHits: false,
   },
 };
 
@@ -119,6 +136,10 @@ export class MouseRace3D {
   private hazardLockedUntil = 0;
   private cheeseLockHintUntil = 0;
   private aliceElapsedMs = 0;
+  private collectedCheeseKeys = 0;
+  private scoutPeeks = 0;
+  private scoutCrumbBank = 0;
+  private scoutPeekUntil = 0;
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
   private playtestTick = 0;
@@ -149,6 +170,7 @@ export class MouseRace3D {
     toast: this.must<HTMLDivElement>("hud-toast"),
     vignette: this.must<HTMLDivElement>("vignette"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
+    scoutButton: this.must<HTMLButtonElement>("scout-btn"),
   };
   private lastGuideLabel = "";
   private lastDistanceText = "";
@@ -255,6 +277,7 @@ export class MouseRace3D {
     });
 
     this.overlay.button.addEventListener("click", () => this.advanceOverlayFlow());
+    this.hud.scoutButton.addEventListener("click", () => this.activateScoutPeek());
     this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", () => {
       if (document.fullscreenElement) {
         void document.exitFullscreen();
@@ -287,6 +310,10 @@ export class MouseRace3D {
       }
       if (event.code === "Escape") {
         this.togglePause();
+      }
+      if (event.code === "KeyM") {
+        event.preventDefault();
+        this.activateScoutPeek();
       }
     });
 
@@ -441,9 +468,12 @@ export class MouseRace3D {
 
     this.hud.root.classList.remove("hidden");
     this.levelIndex = 0;
-    this.lives = 3;
+    this.lives = DIFFICULTY_SETTINGS[this.difficulty].startingLives;
     this.crumbs = 0;
     this.extraLifeBank = 0;
+    this.scoutPeeks = 1;
+    this.scoutCrumbBank = 0;
+    this.scoutPeekUntil = 0;
     this.hasWonGame = false;
     this.hasSeenIntro = false;
     this.loadLevel(0);
@@ -457,6 +487,9 @@ export class MouseRace3D {
     this.hazardLockedUntil = 0;
     this.cheeseLockHintUntil = 0;
     this.catPatrolIndex = 0;
+    this.collectedCheeseKeys = 0;
+    this.scoutPeeks = Math.min(MAX_SCOUT_PEEKS, Math.max(this.scoutPeeks, 1));
+    this.scoutPeekUntil = 0;
 
     if (this.maze) {
       this.scene.remove(this.maze.levelGroup);
@@ -817,6 +850,8 @@ export class MouseRace3D {
     tailGroup.add(tail);
     group.add(tailGroup);
 
+    group.add(this.createWorldMarker("YOU", 0xffffff, 0x4f3414, 1.35));
+
     this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
     return group;
   }
@@ -998,6 +1033,7 @@ export class MouseRace3D {
     goalRing.rotation.x = Math.PI / 2;
     goalRing.position.y = 0.08;
     group.add(goalRing);
+    group.add(this.createWorldMarker("CHEESE", 0xfff1a7, 0x7f4a00, 2.85));
 
     return group;
   }
@@ -1249,8 +1285,9 @@ export class MouseRace3D {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
+    const scoutActive = this.isScoutPeekActive();
 
-    if (!this.isOverlayOpen() && !this.paused && this.maze) {
+    if (!this.isOverlayOpen() && !this.paused && this.maze && !scoutActive) {
       this.updatePlayer(delta);
       this.updateCat(delta);
       this.updatePickups(delta);
@@ -1267,6 +1304,7 @@ export class MouseRace3D {
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
       this.updateGuidanceHud();
+      this.refreshScoutButton();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -1483,14 +1521,16 @@ export class MouseRace3D {
         crumb.mesh.visible = false;
         this.crumbs += 1;
         this.extraLifeBank += 1;
-        if (this.extraLifeBank >= EXTRA_LIFE_CRUMBS) {
+        const crumbsForLife = DIFFICULTY_SETTINGS[this.difficulty].extraLifeCrumbs;
+        if (this.extraLifeBank >= crumbsForLife) {
           this.extraLifeBank = 0;
           this.lives += 1;
-          this.flashHint("Three crumbs earned another life.");
+          this.flashHint(`${crumbsForLife} crumbs earned another life.`);
           this.audio.playLifeUp();
         } else {
           this.audio.playCrumb();
         }
+        this.collectScoutCrumb();
         this.spawnPickupBurst(crumb.position, 0xffe084);
         this.refreshHud();
       }
@@ -1529,16 +1569,17 @@ export class MouseRace3D {
       if (this.player.position.distanceToSquared(key.position) < 0.9 * 0.9) {
         key.active = false;
         key.mesh.visible = false;
+        this.collectedCheeseKeys += 1;
         this.spawnPickupBurst(key.position, 0xffdf5a);
         this.audio.playGem();
-        this.flashHint(`Cheese key found. ${this.remainingCheeseKeys()} left.`);
+        this.flashHint(`Cheese key found. ${this.remainingRequiredCheeseKeys()} still needed.`);
         this.refreshHud();
       }
     }
 
     this.cheese.rotation.y += 0.02;
     if (this.player.position.distanceToSquared(this.cheese.position) < 1.0 * 1.0) {
-      const remainingKeys = this.remainingCheeseKeys();
+      const remainingKeys = this.remainingRequiredCheeseKeys();
       if (remainingKeys === 0) {
         this.completeLevel();
       } else if (performance.now() > this.cheeseLockHintUntil) {
@@ -1548,8 +1589,13 @@ export class MouseRace3D {
     }
   }
 
-  private remainingCheeseKeys(): number {
-    return this.maze.cheeseKeys.filter((key) => key.active).length;
+  private totalRequiredCheeseKeys(): number {
+    const keyLimit = DIFFICULTY_SETTINGS[this.difficulty].requiredKeyLimit;
+    return Math.min(this.maze.cheeseKeys.length, keyLimit ?? this.maze.cheeseKeys.length);
+  }
+
+  private remainingRequiredCheeseKeys(): number {
+    return Math.max(0, this.totalRequiredCheeseKeys() - this.collectedCheeseKeys);
   }
 
   private teleportFromGem(gem: MazePickup): void {
@@ -1608,7 +1654,77 @@ export class MouseRace3D {
     this.alice.lookAt(this.cheese.position.x, 0.2, this.cheese.position.z);
   }
 
+  private collectScoutCrumb(): void {
+    this.scoutCrumbBank += 1;
+    if (this.scoutCrumbBank < SCOUT_CRUMBS_PER_CHARGE || this.scoutPeeks >= MAX_SCOUT_PEEKS) {
+      return;
+    }
+
+    this.scoutCrumbBank = 0;
+    this.scoutPeeks += 1;
+    this.flashHint("Scout peek earned. Press M or 🔭 for a maze view.");
+    this.refreshScoutButton();
+  }
+
+  private activateScoutPeek(): void {
+    if (!this.maze || this.isOverlayOpen()) {
+      return;
+    }
+
+    if (this.isScoutPeekActive()) {
+      this.scoutPeekUntil = performance.now() + SCOUT_PEEK_DURATION_MS;
+      this.flashHint("Scout peek extended. Find yourself, keys, and cheese.");
+      return;
+    }
+
+    if (this.scoutPeeks <= 0) {
+      this.flashHint(`Collect ${SCOUT_CRUMBS_PER_CHARGE} crumbs to earn another scout peek.`, true);
+      return;
+    }
+
+    this.scoutPeeks -= 1;
+    this.scoutPeekUntil = performance.now() + SCOUT_PEEK_DURATION_MS;
+    this.currentSpeed = 0;
+    this.targetSpeed = 0;
+    this.flashHint("Scout peek: the race pauses while you look for keys and cheese.");
+    this.audio.playGem();
+    this.refreshScoutButton();
+  }
+
+  private isScoutPeekActive(): boolean {
+    return performance.now() < this.scoutPeekUntil;
+  }
+
+  private refreshScoutButton(): void {
+    const active = this.isScoutPeekActive();
+    this.hud.scoutButton.textContent = active ? "🗺️" : `🔭${this.scoutPeeks}`;
+    this.hud.scoutButton.classList.toggle("active", active);
+    this.hud.scoutButton.setAttribute(
+      "aria-label",
+      active
+        ? "Scout view active"
+        : `Use scout view. ${this.scoutPeeks} ${this.scoutPeeks === 1 ? "peek" : "peeks"} available`,
+    );
+  }
+
+  private updateScoutCamera(): void {
+    this.cameraYaw = 0;
+    const scoutHeight = Math.max(this.maze.mazeWidth, this.maze.mazeDepth) * 0.9;
+    this.cameraTarget.set(this.maze.mazeCenter.x, scoutHeight, this.maze.mazeCenter.z + 0.01);
+    this.camera.position.lerp(this.cameraTarget, this.cameraInitialized ? 0.18 : 1);
+    this.cameraInitialized = true;
+    this.camera.lookAt(this.maze.mazeCenter.x, 0, this.maze.mazeCenter.z);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 64, 0.14);
+    this.camera.updateProjectionMatrix();
+    this.refreshScoutButton();
+  }
+
   private updateCamera(_delta: number): void {
+    if (this.isScoutPeekActive()) {
+      this.updateScoutCamera();
+      return;
+    }
+
     this.cameraYaw = this.playerHeading;
     const baseDist = 5.4;
     const height = 3.0;
@@ -1726,9 +1842,16 @@ export class MouseRace3D {
     }
 
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
-    this.lives -= 1;
     this.cameraShakeAmp = 0.45;
     this.audio.playHazard();
+
+    if (DIFFICULTY_SETTINGS[this.difficulty].forgivingHits) {
+      this.refreshHud();
+      this.showOverlay("Try Again", `${message}\nNo life lost in Kid mode. Take a breath and keep your keys.`);
+      return;
+    }
+
+    this.lives -= 1;
     this.refreshHud();
 
     if (this.lives <= 0) {
@@ -1795,6 +1918,18 @@ export class MouseRace3D {
     this.resetActors();
   }
 
+  private getIntroTip(): string {
+    if (this.difficulty === "easy") {
+      return "Kid mode keeps every maze playful: only 1 key is required, bumps do not cost lives, crumbs give lives faster, and Alice takes her time.";
+    }
+
+    if (this.difficulty === "medium") {
+      return "Medium mode asks for 2 keys per maze, gives 4 lives, and keeps the chase gentler than Hard.";
+    }
+
+    return "Hard mode is the full challenge with every key required and no free bumps.";
+  }
+
   private showIntro(): void {
     if (this.hasSeenIntro) {
       return;
@@ -1803,7 +1938,7 @@ export class MouseRace3D {
     this.hasSeenIntro = true;
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
-      "Use the maze paths in real 3D space. Grab crumbs, collect every cheese key, dodge traps, use paired teleport gems, watch the cat patrol, and beat Alice to the wedge.",
+      `${this.getIntroTip()} Use the maze paths in real 3D space. Grab crumbs, collect cheese keys, dodge traps, use paired teleport gems, watch the cat patrol, use scout peeks to zoom up when lost, and beat Alice to the wedge.`,
     );
   }
 
@@ -1840,8 +1975,9 @@ export class MouseRace3D {
       `<span class="sep">·</span>` +
       `<span>🧀 ${this.crumbs}</span>` +
       `<span class="sep">·</span>` +
-      `<span>🔑 ${this.remainingCheeseKeys()}</span>`;
+      `<span>🔑 ${this.remainingRequiredCheeseKeys()}/${this.totalRequiredCheeseKeys()}</span>`;
     this.hud.status.style.color = level.theme.hud;
+    this.refreshScoutButton();
     this.updateGuidanceHud();
   }
 
@@ -1908,7 +2044,7 @@ export class MouseRace3D {
       catSpeed: level ? this.getCatSpeed(level) : 0,
       lives: this.lives,
       crumbs: this.crumbs,
-      extraLifeIn: EXTRA_LIFE_CRUMBS - this.extraLifeBank,
+      extraLifeIn: DIFFICULTY_SETTINGS[this.difficulty].extraLifeCrumbs - this.extraLifeBank,
       overlayOpen: this.isOverlayOpen(),
       levelComplete: this.levelComplete,
       won: this.hasWonGame,
@@ -1928,6 +2064,10 @@ export class MouseRace3D {
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
       remainingCheeseKeys: this.maze?.cheeseKeys.filter((item) => item.active).length ?? 0,
+      requiredCheeseKeysLeft: this.maze ? this.remainingRequiredCheeseKeys() : 0,
+      scoutPeeks: this.scoutPeeks,
+      scoutCrumbsUntilNext: Math.max(0, SCOUT_CRUMBS_PER_CHARGE - this.scoutCrumbBank),
+      scoutActive: this.isScoutPeekActive(),
       gemPairs: this.maze?.gems.map((gem, index) => `${index}->${gem.pairIndex ?? "none"}`) ?? [],
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),

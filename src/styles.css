@@ -141,8 +141,15 @@ input {
   justify-content: center;
 }
 
-.hud-button:hover {
+.hud-button:hover,
+.hud-button.active {
   background: #ffcc60;
+}
+
+#scout-btn {
+  min-width: 46px;
+  width: auto;
+  padding: 0 9px;
 }
 
 #timer-track {
