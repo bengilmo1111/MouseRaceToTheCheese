@@ -41,6 +41,7 @@ type MazeState = {
   traps: MazeHazard[];
   trapGlows: THREE.Mesh[];
   gems: MazePickup[];
+  cheeseKeys: MazePickup[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
   startPoint: THREE.Vector3;
@@ -116,6 +117,7 @@ export class MouseRace3D {
   private hasWonGame = false;
   private gemCooldownUntil = 0;
   private hazardLockedUntil = 0;
+  private cheeseLockHintUntil = 0;
   private aliceElapsedMs = 0;
   private currentHintTimeout = 0;
   private catPatrolIndex = 0;
@@ -453,6 +455,7 @@ export class MouseRace3D {
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
     this.hazardLockedUntil = 0;
+    this.cheeseLockHintUntil = 0;
     this.catPatrolIndex = 0;
 
     if (this.maze) {
@@ -489,6 +492,7 @@ export class MouseRace3D {
     const traps: MazeHazard[] = [];
     const trapGlows: THREE.Mesh[] = [];
     const gems: MazePickup[] = [];
+    const cheeseKeys: MazePickup[] = [];
     const patrol: THREE.Vector3[] = [];
 
     const rows = level.map.length;
@@ -595,6 +599,15 @@ export class MouseRace3D {
           return;
         }
 
+        if (cell === "K") {
+          const key = this.buildCheeseKey(level.theme.accent);
+          key.position.set(x, 0.45, z);
+          key.add(this.createWorldMarker("KEY", level.theme.accent, level.theme.trim, 0.95));
+          group.add(key);
+          cheeseKeys.push({ mesh: key, position: key.position.clone(), active: true });
+          return;
+        }
+
         if (cell === "P") {
           startPoint = new THREE.Vector3(x, 0.3, z);
         }
@@ -660,6 +673,7 @@ export class MouseRace3D {
       traps,
       trapGlows,
       gems,
+      cheeseKeys,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
       startPoint,
@@ -1062,6 +1076,54 @@ export class MouseRace3D {
     return group;
   }
 
+  private buildCheeseKey(accentColor: number): THREE.Group {
+    const group = new THREE.Group();
+    const keyMat = new THREE.MeshStandardMaterial({
+      color: 0xffdf5a,
+      emissive: accentColor,
+      emissiveIntensity: 0.35,
+      roughness: 0.28,
+      metalness: 0.55,
+    });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x8a5a16, roughness: 0.5, metalness: 0.25 });
+
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.055, 10, 24), keyMat);
+    bow.rotation.x = Math.PI / 2;
+    bow.castShadow = true;
+    group.add(bow);
+
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.72), keyMat);
+    shaft.position.z = 0.48;
+    shaft.castShadow = true;
+    group.add(shaft);
+
+    const toothA = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.12), darkMat);
+    toothA.position.set(0.08, 0, 0.82);
+    toothA.castShadow = true;
+    group.add(toothA);
+
+    const toothB = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.12), darkMat);
+    toothB.position.set(-0.04, 0, 0.62);
+    toothB.castShadow = true;
+    group.add(toothB);
+
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(0.35, 0.78, 32),
+      new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = -0.38;
+    group.add(glow);
+
+    return group;
+  }
+
   private buildMouseTrap(): THREE.Group {
     const group = new THREE.Group();
     const woodMat = new THREE.MeshStandardMaterial({ color: 0xc28a4a, roughness: 0.82 });
@@ -1460,10 +1522,34 @@ export class MouseRace3D {
       }
     }
 
+    for (const key of this.maze.cheeseKeys) {
+      if (!key.active) continue;
+      key.mesh.rotation.y += 0.035;
+      key.mesh.position.y = 0.45 + Math.sin(performance.now() * 0.0045 + key.position.z) * 0.08;
+      if (this.player.position.distanceToSquared(key.position) < 0.9 * 0.9) {
+        key.active = false;
+        key.mesh.visible = false;
+        this.spawnPickupBurst(key.position, 0xffdf5a);
+        this.audio.playGem();
+        this.flashHint(`Cheese key found. ${this.remainingCheeseKeys()} left.`);
+        this.refreshHud();
+      }
+    }
+
     this.cheese.rotation.y += 0.02;
     if (this.player.position.distanceToSquared(this.cheese.position) < 1.0 * 1.0) {
-      this.completeLevel();
+      const remainingKeys = this.remainingCheeseKeys();
+      if (remainingKeys === 0) {
+        this.completeLevel();
+      } else if (performance.now() > this.cheeseLockHintUntil) {
+        this.cheeseLockHintUntil = performance.now() + 1800;
+        this.flashHint(`${remainingKeys} cheese ${remainingKeys === 1 ? "key" : "keys"} still lock the wedge.`, true);
+      }
     }
+  }
+
+  private remainingCheeseKeys(): number {
+    return this.maze.cheeseKeys.filter((key) => key.active).length;
   }
 
   private teleportFromGem(gem: MazePickup): void {
@@ -1717,7 +1803,7 @@ export class MouseRace3D {
     this.hasSeenIntro = true;
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
-      "Use the maze paths in real 3D space. Grab crumbs, dodge traps, watch the cat patrol, and beat Alice to the wedge.",
+      "Use the maze paths in real 3D space. Grab crumbs, collect every cheese key, dodge traps, use paired teleport gems, watch the cat patrol, and beat Alice to the wedge.",
     );
   }
 
@@ -1727,6 +1813,7 @@ export class MouseRace3D {
     this.catPatrolIndex = 0;
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
+    this.cheeseLockHintUntil = 0;
     this.catChasing = false;
     this.hud.vignette.classList.remove("active");
     this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
@@ -1751,7 +1838,9 @@ export class MouseRace3D {
       `<span class="sep">·</span>` +
       `<span class="hearts">${hearts}</span>` +
       `<span class="sep">·</span>` +
-      `<span>🧀 ${this.crumbs}</span>`;
+      `<span>🧀 ${this.crumbs}</span>` +
+      `<span class="sep">·</span>` +
+      `<span>🔑 ${this.remainingCheeseKeys()}</span>`;
     this.hud.status.style.color = level.theme.hud;
     this.updateGuidanceHud();
   }
@@ -1838,6 +1927,8 @@ export class MouseRace3D {
       },
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
+      remainingCheeseKeys: this.maze?.cheeseKeys.filter((item) => item.active).length ?? 0,
+      gemPairs: this.maze?.gems.map((gem, index) => `${index}->${gem.pairIndex ?? "none"}`) ?? [],
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
       catMode: this.catChasing ? "chasing" : "patrolling",
