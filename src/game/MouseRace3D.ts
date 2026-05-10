@@ -4,8 +4,17 @@ import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
+const DIFFICULTY_KEY = "mouseRace.difficulty";
 
 type ControlKey = "up" | "down" | "left" | "right";
+type DifficultyKey = "easy" | "medium" | "hard";
+
+type DifficultySettings = {
+  label: string;
+  catSpeedMultiplier: number;
+  aliceTimeMultiplier: number;
+  chaseRangeMultiplier: number;
+};
 
 type WallRect = {
   minX: number;
@@ -44,6 +53,28 @@ type MazeState = {
 
 const PLAYER_RADIUS = 0.42;
 const CAT_RADIUS = 0.5;
+const EXTRA_LIFE_CRUMBS = 3;
+const DEFAULT_DIFFICULTY: DifficultyKey = "hard";
+const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
+  easy: {
+    label: "Easy",
+    catSpeedMultiplier: 0.55,
+    aliceTimeMultiplier: 1.75,
+    chaseRangeMultiplier: 0.82,
+  },
+  medium: {
+    label: "Medium",
+    catSpeedMultiplier: 0.78,
+    aliceTimeMultiplier: 1.3,
+    chaseRangeMultiplier: 0.92,
+  },
+  hard: {
+    label: "Hard",
+    catSpeedMultiplier: 1,
+    aliceTimeMultiplier: 1,
+    chaseRangeMultiplier: 1,
+  },
+};
 
 export class MouseRace3D {
   private readonly host: HTMLElement;
@@ -93,10 +124,9 @@ export class MouseRace3D {
   private cameraYaw = 0;
   private cameraInitialized = false;
   private catChasing = false;
-  private cameraShakeAmount = 0;
+  private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
 
   private bgMusic: HTMLAudioElement;
-  private audioCtx?: AudioContext;
 
   private maze!: MazeState;
   private player!: THREE.Group;
@@ -216,6 +246,8 @@ export class MouseRace3D {
   }
 
   private bindUi(): void {
+    this.bindDifficultyPicker();
+
     this.must<HTMLButtonElement>("start-btn").addEventListener("click", () => {
       this.startRun(true);
     });
@@ -290,6 +322,37 @@ export class MouseRace3D {
     });
   }
 
+  private bindDifficultyPicker(): void {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-difficulty]"));
+    const savedDifficulty = localStorage.getItem(DIFFICULTY_KEY);
+    const setDifficulty = (difficulty: DifficultyKey, persist = true): void => {
+      this.difficulty = difficulty;
+      if (persist) {
+        localStorage.setItem(DIFFICULTY_KEY, difficulty);
+      }
+      buttons.forEach((button) => {
+        const isActive = button.dataset.difficulty === difficulty;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    };
+
+    buttons.forEach((button) => {
+      const difficulty = button.dataset.difficulty as DifficultyKey | undefined;
+      if (!difficulty || !(difficulty in DIFFICULTY_SETTINGS)) {
+        return;
+      }
+
+      button.addEventListener("click", () => setDifficulty(difficulty));
+    });
+
+    if (savedDifficulty && savedDifficulty in DIFFICULTY_SETTINGS) {
+      setDifficulty(savedDifficulty as DifficultyKey, false);
+    } else {
+      setDifficulty(this.difficulty, false);
+    }
+  }
+
   private bindPlaytestUi(): void {
     const params = new URLSearchParams(window.location.search);
     const showPanel = params.get("playtest") === "1" || window.location.hash.includes("playtest");
@@ -311,7 +374,7 @@ export class MouseRace3D {
       warpCat: () => this.warpToCat(),
       forceHit: () => this.triggerHazard("Forced agent hit."),
       setAliceProgress: (ratio: number) => {
-        this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * Math.max(0, Math.min(1, ratio));
+        this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * Math.max(0, Math.min(1, ratio));
       },
       showPanel: () => panel?.classList.remove("hidden"),
     };
@@ -330,7 +393,7 @@ export class MouseRace3D {
     this.must<HTMLButtonElement>("ptest-cheese").addEventListener("click", () => this.warpToCheese());
     this.must<HTMLButtonElement>("ptest-cat").addEventListener("click", () => this.warpToCat());
     this.must<HTMLButtonElement>("ptest-alice").addEventListener("click", () => {
-      this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * 0.95;
+      this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * 0.95;
       this.updatePlaytestState();
     });
     this.must<HTMLButtonElement>("ptest-hit").addEventListener("click", () => this.triggerHazard("Forced playtest hit."));
@@ -1228,17 +1291,10 @@ export class MouseRace3D {
     const targetPitch = THREE.MathUtils.clamp(speedFraction * 0.18, -0.18, 0.18);
     this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, targetPitch, Math.min(1, delta * 6));
 
-    if (this.playerVelocity.lengthSq() > 0) {
-      this.playerHeading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
-      this.player.rotation.y = this.playerHeading;
-      this.player.rotation.z = Math.sin(performance.now() * 0.015) * 0.15;
-    } else {
-      this.player.rotation.z = THREE.MathUtils.lerp(this.player.rotation.z, 0, 0.2);
-    }
-    this.player.rotation.set(this.pitchAngle, this.playerHeading, this.bankAngle);
-
     const moving = Math.abs(this.currentSpeed) > 0.2;
     const bob = moving ? Math.sin(performance.now() * 0.018) * 0.05 * Math.abs(speedFraction) : 0;
+    const waddle = moving ? Math.sin(performance.now() * 0.015) * 0.08 * Math.abs(speedFraction) : 0;
+    this.player.rotation.set(this.pitchAngle, this.playerHeading, this.bankAngle + waddle);
     this.player.position.y = 0.3 + bob;
   }
 
@@ -1294,7 +1350,8 @@ export class MouseRace3D {
     const playerVector = this.player.position.clone().sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
-    const chaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
+    const baseChaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
+    const chaseRange = baseChaseRange * DIFFICULTY_SETTINGS[this.difficulty].chaseRangeMultiplier;
     const shouldChase = playerDistance < chaseRange;
 
     if (shouldChase !== this.catChasing) {
@@ -1316,11 +1373,10 @@ export class MouseRace3D {
     }
 
     const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : 0.85;
-    vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
+    vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
-    this.cat.rotation.y = Math.atan2(vector.x, vector.z);
-    this.cat.rotation.z = Math.sin(performance.now() * 0.012) * 0.15;
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
+    this.cat.rotation.z = Math.sin(performance.now() * 0.012) * (shouldChase ? 0.14 : 0.09);
     this.cat.position.y = 0.34 + Math.sin(performance.now() * 0.008) * 0.04;
 
     if (this.player.position.distanceToSquared(this.cat.position) < 0.85 * 0.85) {
@@ -1337,17 +1393,10 @@ export class MouseRace3D {
         crumb.mesh.visible = false;
         this.crumbs += 1;
         this.extraLifeBank += 1;
-        this.playTone(800 + Math.random() * 200, "sine", 0.1, 0.15);
-        if (this.extraLifeBank >= 3) {
+        if (this.extraLifeBank >= EXTRA_LIFE_CRUMBS) {
           this.extraLifeBank = 0;
           this.lives += 1;
-          this.playTone(600, "square", 0.1, 0.2);
-          setTimeout(() => this.playTone(900, "square", 0.3, 0.2), 100);
           this.flashHint("Three crumbs earned another life.");
-        if (this.extraLifeBank >= 6) {
-          this.extraLifeBank = 0;
-          this.lives += 1;
-          this.flashHint("+1 life");
           this.audio.playLifeUp();
         } else {
           this.audio.playCrumb();
@@ -1401,40 +1450,15 @@ export class MouseRace3D {
 
     this.gemCooldownUntil = performance.now() + 900;
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
-    this.cameraShakeAmount = 0.2;
-    this.playTone(600, "triangle", 0.1, 0.2);
-    setTimeout(() => this.playTone(1200, "triangle", 0.3, 0.2), 100);
+    this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.22);
     this.flashHint("Zip. The teleport gem shifted the maze under you.");
-    this.flashHint("Teleported!");
     this.audio.playGem();
-  }
-
-  private playTone(frequency: number, type: OscillatorType, duration: number, volume: number = 0.1): void {
-    if (!this.audioCtx) {
-      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (this.audioCtx.state === "suspended") {
-      void this.audioCtx.resume();
-    }
-    const osc = this.audioCtx.createOscillator();
-    const gain = this.audioCtx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(frequency, this.audioCtx.currentTime);
-    
-    gain.gain.setValueAtTime(volume, this.audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + duration);
-    
-    osc.connect(gain);
-    gain.connect(this.audioCtx.destination);
-    
-    osc.start();
-    osc.stop(this.audioCtx.currentTime + duration);
   }
 
   private updateAlice(delta: number): void {
     const level = LEVELS[this.levelIndex];
     this.aliceElapsedMs += delta * 1000;
-    const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / level.aliceTimeMs, 0, 1);
+    const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / this.getAliceTimeMs(level), 0, 1);
     this.updateAlicePosition(progress);
     this.hud.timerFill.style.transform = `scaleX(${1 - progress})`;
 
@@ -1452,6 +1476,14 @@ export class MouseRace3D {
     }
   }
 
+  private getCatSpeed(level: LevelDefinition): number {
+    return level.catSpeed * DIFFICULTY_SETTINGS[this.difficulty].catSpeedMultiplier;
+  }
+
+  private getAliceTimeMs(level: LevelDefinition): number {
+    return level.aliceTimeMs * DIFFICULTY_SETTINGS[this.difficulty].aliceTimeMultiplier;
+  }
+
   private updateAlicePosition(progress: number): void {
     const angle = progress * Math.PI * 2 + Math.PI * 0.22;
     const radiusX = this.maze.mazeWidth * 0.58;
@@ -1462,20 +1494,6 @@ export class MouseRace3D {
     this.alice.lookAt(this.cheese.position.x, 0.2, this.cheese.position.z);
   }
 
-  private updateCamera(delta: number): void {
-    this.cameraYaw = THREE.MathUtils.lerp(this.cameraYaw, this.playerHeading, 0.08);
-    const offsetX = -Math.sin(this.cameraYaw) * 6.6;
-    const offsetZ = -Math.cos(this.cameraYaw) * 6.6;
-    this.cameraTarget.set(this.player.position.x + offsetX, this.player.position.y + 6.2, this.player.position.z + offsetZ);
-    this.camera.position.lerp(this.cameraTarget, 0.12);
-    const lookAheadX = this.player.position.x + Math.sin(this.playerHeading) * 1.9;
-    const lookAheadZ = this.player.position.z + Math.cos(this.playerHeading) * 1.9;
-    this.camera.lookAt(lookAheadX, this.player.position.y + 0.55, lookAheadZ);
-    
-    if (this.cameraShakeAmount > 0) {
-      this.camera.position.x += (Math.random() - 0.5) * this.cameraShakeAmount;
-      this.camera.position.z += (Math.random() - 0.5) * this.cameraShakeAmount;
-      this.cameraShakeAmount = Math.max(0, this.cameraShakeAmount - delta * 2.0);
   private updateCamera(_delta: number): void {
     this.cameraYaw = this.playerHeading;
     const baseDist = 5.4;
@@ -1593,8 +1611,6 @@ export class MouseRace3D {
       return;
     }
 
-    this.playTone(150, "sawtooth", 0.4, 0.3);
-    this.cameraShakeAmount = 0.5;
     this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
     this.lives -= 1;
     this.cameraShakeAmp = 0.45;
@@ -1672,7 +1688,7 @@ export class MouseRace3D {
 
     this.hasSeenIntro = true;
     this.showOverlay(
-      "Race To The Cheese",
+      `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
       "Use the maze paths in real 3D space. Grab crumbs, dodge traps, watch the cat patrol, and beat Alice to the wedge.",
     );
   }
@@ -1703,7 +1719,7 @@ export class MouseRace3D {
     const level = LEVELS[this.levelIndex];
     const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, 3 - this.lives));
     this.hud.status.innerHTML =
-      `<span class="level">L${level.id} · ${level.title}</span>` +
+      `<span class="level">${DIFFICULTY_SETTINGS[this.difficulty].label} · L${level.id} · ${level.title}</span>` +
       `<span class="sep">·</span>` +
       `<span class="hearts">${hearts}</span>` +
       `<span class="sep">·</span>` +
@@ -1765,13 +1781,17 @@ export class MouseRace3D {
 
   private getStateSnapshot(): Record<string, unknown> {
     const level = LEVELS[this.levelIndex];
-    const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / level.aliceTimeMs) : 0;
+    const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / this.getAliceTimeMs(level)) : 0;
     return {
       level: this.levelIndex + 1,
       title: level?.title ?? "n/a",
+      difficulty: this.difficulty,
+      difficultyLabel: DIFFICULTY_SETTINGS[this.difficulty].label,
+      aliceTimeMs: level ? this.getAliceTimeMs(level) : 0,
+      catSpeed: level ? this.getCatSpeed(level) : 0,
       lives: this.lives,
       crumbs: this.crumbs,
-      extraLifeIn: 6 - this.extraLifeBank,
+      extraLifeIn: EXTRA_LIFE_CRUMBS - this.extraLifeBank,
       overlayOpen: this.isOverlayOpen(),
       levelComplete: this.levelComplete,
       won: this.hasWonGame,

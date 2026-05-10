@@ -39,6 +39,20 @@
               Sprint through the maze, grab crumbs, dodge traps, slip past the cat,
               and reach the parmesan before Alice crawls in from outside.
             </p>
+            <div class="difficulty-picker" aria-label="Difficulty level">
+              <button class="difficulty-btn" type="button" data-difficulty="easy" aria-pressed="false">
+                <strong>Easy</strong>
+                <span>Slow cat · long Alice timer</span>
+              </button>
+              <button class="difficulty-btn" type="button" data-difficulty="medium" aria-pressed="false">
+                <strong>Medium</strong>
+                <span>Balanced chase</span>
+              </button>
+              <button class="difficulty-btn active" type="button" data-difficulty="hard" aria-pressed="true">
+                <strong>Hard</strong>
+                <span>Original speed</span>
+              </button>
+            </div>
             <div class="hero-notes">
               <span>Up/Down (W/S or ↑/↓): forward & back</span>
               <span>Left/Right (A/D or ←/→): turn the mouse</span>
@@ -57,11 +71,11 @@
         </div>
         <div id="touch-controls">
           <div class="touch-stack left">
-            <button id="touch-up" class="touch-btn arrow" type="button">UP</button>
+            <button id="touch-up" class="touch-btn arrow" type="button" aria-label="Move forward">▲</button>
             <div class="touch-row">
-              <button id="touch-left" class="touch-btn arrow" type="button">LT</button>
-              <button id="touch-down" class="touch-btn arrow" type="button">DN</button>
-              <button id="touch-right" class="touch-btn arrow" type="button">RT</button>
+              <button id="touch-left" class="touch-btn arrow" type="button" aria-label="Turn left">◀</button>
+              <button id="touch-down" class="touch-btn arrow" type="button" aria-label="Move backward">▼</button>
+              <button id="touch-right" class="touch-btn arrow" type="button" aria-label="Turn right">▶</button>
             </div>
           </div>
         </div>
