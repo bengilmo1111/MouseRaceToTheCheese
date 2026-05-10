@@ -302,23 +302,51 @@ export class MouseRace3D {
       "touch-right": "right",
     };
 
+    const releaseAllTouchControls = (): void => {
+      Object.entries(touchMap).forEach(([id, key]) => {
+        this.controls[key] = false;
+        this.must<HTMLButtonElement>(id).classList.remove("active");
+      });
+    };
+
+    this.must<HTMLDivElement>("touch-controls").addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+    });
+
     Object.entries(touchMap).forEach(([id, key]) => {
       const element = this.must<HTMLButtonElement>(id);
       const activate = (value: boolean) => {
         this.controls[key] = value;
         element.classList.toggle("active", value);
       };
+      const deactivate = (event: PointerEvent) => {
+        event.preventDefault();
+        activate(false);
+      };
 
+      element.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+      });
       element.addEventListener("pointerdown", (event) => {
         event.preventDefault();
+        element.setPointerCapture(event.pointerId);
         activate(true);
       });
-      ["pointerup", "pointercancel", "pointerleave", "pointerout"].forEach((type) => {
-        element.addEventListener(type, (event) => {
-          event.preventDefault();
-          activate(false);
-        });
+      element.addEventListener("pointerup", (event) => {
+        if (element.hasPointerCapture(event.pointerId)) {
+          element.releasePointerCapture(event.pointerId);
+        }
+        deactivate(event);
       });
+      element.addEventListener("pointercancel", deactivate);
+      element.addEventListener("lostpointercapture", () => activate(false));
+    });
+
+    window.addEventListener("blur", releaseAllTouchControls);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        releaseAllTouchControls();
+      }
     });
   }
 
