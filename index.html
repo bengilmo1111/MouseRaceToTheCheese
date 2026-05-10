@@ -69,14 +69,18 @@
             <button id="overlay-btn" class="primary-btn" type="button">Continue</button>
           </div>
         </div>
-        <div id="touch-controls">
-          <div class="touch-stack left">
-            <button id="touch-up" class="touch-btn arrow" type="button" aria-label="Move forward">▲</button>
-            <div class="touch-row">
+        <div id="touch-controls" aria-label="Touch movement controls">
+          <div class="touch-pad touch-pad-steer" aria-label="Steering controls">
+            <div class="touch-pad-label">Steer</div>
+            <div class="touch-row separated">
               <button id="touch-left" class="touch-btn arrow" type="button" aria-label="Turn left">◀</button>
-              <button id="touch-down" class="touch-btn arrow" type="button" aria-label="Move backward">▼</button>
               <button id="touch-right" class="touch-btn arrow" type="button" aria-label="Turn right">▶</button>
             </div>
+          </div>
+          <div class="touch-pad touch-pad-drive" aria-label="Forward and reverse controls">
+            <div class="touch-pad-label">Move</div>
+            <button id="touch-up" class="touch-btn arrow touch-btn-primary" type="button" aria-label="Move forward">▲</button>
+            <button id="touch-down" class="touch-btn arrow" type="button" aria-label="Move backward">▼</button>
           </div>
         </div>
         <aside id="playtest-panel" class="hidden">
