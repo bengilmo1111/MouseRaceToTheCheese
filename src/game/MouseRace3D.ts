@@ -124,6 +124,7 @@ export class MouseRace3D {
   private cameraYaw = 0;
   private cameraInitialized = false;
   private catChasing = false;
+  private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
 
   private bgMusic: HTMLAudioElement;
 
