@@ -523,8 +523,26 @@ input {
     justify-self: end;
   }
 
+  .hud-center {
+    width: 100%;
+    min-width: 0;
+  }
+
   #timer-track {
-    width: min(82vw, 340px);
+    width: min(calc(100% - 64px), 320px);
+    min-width: 0;
+    margin-right: 36px;
+    margin-left: 28px;
+  }
+
+  #timer-alice,
+  #timer-cheese {
+    width: 38px;
+    height: 38px;
+  }
+
+  #timer-cheese {
+    right: -18px;
   }
 
   .screen-card {

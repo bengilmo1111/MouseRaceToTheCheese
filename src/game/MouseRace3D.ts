@@ -854,20 +854,6 @@ export class MouseRace3D {
     tailGroup.add(tail);
     group.add(tailGroup);
 
-    const playerHalo = new THREE.Mesh(
-      new THREE.RingGeometry(0.56, 0.78, 36),
-      new THREE.MeshBasicMaterial({
-        color: 0x4fc3ff,
-        transparent: true,
-        opacity: 0.58,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    );
-    playerHalo.rotation.x = -Math.PI / 2;
-    playerHalo.position.y = -0.27;
-    group.add(playerHalo);
-
     this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
     return group;
   }
