@@ -153,12 +153,18 @@ input {
 }
 
 #timer-track {
-  width: min(34vw, 280px);
-  min-width: 160px;
-  height: 12px;
-  padding: 3px;
+  --alice-progress: 0;
+  position: relative;
+  width: min(38vw, 340px);
+  min-width: 190px;
+  height: 18px;
+  margin: 13px 24px 0 18px;
+  padding: 4px 7px;
   border-radius: 999px;
-  background: rgba(255, 248, 225, 0.78);
+  background:
+    linear-gradient(90deg, rgba(69, 150, 215, 0.2), rgba(255, 246, 202, 0.72)),
+    rgba(255, 248, 225, 0.82);
+  overflow: visible;
 }
 
 .hud-toast {
@@ -219,7 +225,37 @@ input {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #ffbf4b 0%, #ff8e57 70%, #e75b55 100%);
-  transform-origin: left center;
+  transform-origin: right center;
+}
+
+#timer-alice,
+#timer-cheese {
+  position: absolute;
+  top: 50%;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 5px 7px rgba(61, 38, 11, 0.28));
+}
+
+#timer-alice {
+  left: calc(7px + (100% - 14px) * var(--alice-progress));
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  border: 3px solid #caefff;
+  background: #116ed3;
+  transition: left 0.12s linear;
+}
+
+#timer-cheese {
+  right: -24px;
+  z-index: 1;
+  transform: translate(0, -50%);
+  border: 3px solid #fff4be;
+  background: #38a7df;
 }
 
 .screen {
@@ -488,7 +524,7 @@ input {
   }
 
   #timer-track {
-    width: min(92vw, 340px);
+    width: min(82vw, 340px);
   }
 
   .screen-card {

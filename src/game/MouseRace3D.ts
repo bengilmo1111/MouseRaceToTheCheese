@@ -170,6 +170,7 @@ export class MouseRace3D {
     toast: this.must<HTMLDivElement>("hud-toast"),
     vignette: this.must<HTMLDivElement>("vignette"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
+    timerAlice: this.must<HTMLImageElement>("timer-alice"),
     scoutButton: this.must<HTMLButtonElement>("scout-btn"),
   };
   private lastGuideLabel = "";
@@ -1621,6 +1622,8 @@ export class MouseRace3D {
     const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / this.getAliceTimeMs(level), 0, 1);
     this.updateAlicePosition(progress);
     this.hud.timerFill.style.transform = `scaleX(${1 - progress})`;
+    this.hud.timerAlice.style.setProperty("--alice-progress", progress.toString());
+    this.hud.timerAlice.setAttribute("aria-label", `Alice is ${Math.round(progress * 100)}% of the way to the cheese`);
 
     if (progress > 0.8) {
       this.hud.timerFill.style.background = "linear-gradient(90deg, #ff9252 0%, #e85452 100%)";
