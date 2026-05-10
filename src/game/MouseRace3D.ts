@@ -4,8 +4,17 @@ import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
+const DIFFICULTY_KEY = "mouseRace.difficulty";
 
 type ControlKey = "up" | "down" | "left" | "right";
+type DifficultyKey = "easy" | "medium" | "hard";
+
+type DifficultySettings = {
+  label: string;
+  catSpeedMultiplier: number;
+  aliceTimeMultiplier: number;
+  chaseRangeMultiplier: number;
+};
 
 type WallRect = {
   minX: number;
@@ -45,6 +54,27 @@ type MazeState = {
 const PLAYER_RADIUS = 0.42;
 const CAT_RADIUS = 0.5;
 const EXTRA_LIFE_CRUMBS = 3;
+const DEFAULT_DIFFICULTY: DifficultyKey = "hard";
+const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
+  easy: {
+    label: "Easy",
+    catSpeedMultiplier: 0.55,
+    aliceTimeMultiplier: 1.75,
+    chaseRangeMultiplier: 0.82,
+  },
+  medium: {
+    label: "Medium",
+    catSpeedMultiplier: 0.78,
+    aliceTimeMultiplier: 1.3,
+    chaseRangeMultiplier: 0.92,
+  },
+  hard: {
+    label: "Hard",
+    catSpeedMultiplier: 1,
+    aliceTimeMultiplier: 1,
+    chaseRangeMultiplier: 1,
+  },
+};
 
 export class MouseRace3D {
   private readonly host: HTMLElement;
@@ -215,6 +245,8 @@ export class MouseRace3D {
   }
 
   private bindUi(): void {
+    this.bindDifficultyPicker();
+
     this.must<HTMLButtonElement>("start-btn").addEventListener("click", () => {
       this.startRun(true);
     });
@@ -289,6 +321,37 @@ export class MouseRace3D {
     });
   }
 
+  private bindDifficultyPicker(): void {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-difficulty]"));
+    const savedDifficulty = localStorage.getItem(DIFFICULTY_KEY);
+    const setDifficulty = (difficulty: DifficultyKey, persist = true): void => {
+      this.difficulty = difficulty;
+      if (persist) {
+        localStorage.setItem(DIFFICULTY_KEY, difficulty);
+      }
+      buttons.forEach((button) => {
+        const isActive = button.dataset.difficulty === difficulty;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    };
+
+    buttons.forEach((button) => {
+      const difficulty = button.dataset.difficulty as DifficultyKey | undefined;
+      if (!difficulty || !(difficulty in DIFFICULTY_SETTINGS)) {
+        return;
+      }
+
+      button.addEventListener("click", () => setDifficulty(difficulty));
+    });
+
+    if (savedDifficulty && savedDifficulty in DIFFICULTY_SETTINGS) {
+      setDifficulty(savedDifficulty as DifficultyKey, false);
+    } else {
+      setDifficulty(this.difficulty, false);
+    }
+  }
+
   private bindPlaytestUi(): void {
     const params = new URLSearchParams(window.location.search);
     const showPanel = params.get("playtest") === "1" || window.location.hash.includes("playtest");
@@ -310,7 +373,7 @@ export class MouseRace3D {
       warpCat: () => this.warpToCat(),
       forceHit: () => this.triggerHazard("Forced agent hit."),
       setAliceProgress: (ratio: number) => {
-        this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * Math.max(0, Math.min(1, ratio));
+        this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * Math.max(0, Math.min(1, ratio));
       },
       showPanel: () => panel?.classList.remove("hidden"),
     };
@@ -329,7 +392,7 @@ export class MouseRace3D {
     this.must<HTMLButtonElement>("ptest-cheese").addEventListener("click", () => this.warpToCheese());
     this.must<HTMLButtonElement>("ptest-cat").addEventListener("click", () => this.warpToCat());
     this.must<HTMLButtonElement>("ptest-alice").addEventListener("click", () => {
-      this.aliceElapsedMs = LEVELS[this.levelIndex].aliceTimeMs * 0.95;
+      this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * 0.95;
       this.updatePlaytestState();
     });
     this.must<HTMLButtonElement>("ptest-hit").addEventListener("click", () => this.triggerHazard("Forced playtest hit."));
@@ -1286,7 +1349,8 @@ export class MouseRace3D {
     const playerVector = this.player.position.clone().sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
-    const chaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
+    const baseChaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
+    const chaseRange = baseChaseRange * DIFFICULTY_SETTINGS[this.difficulty].chaseRangeMultiplier;
     const shouldChase = playerDistance < chaseRange;
 
     if (shouldChase !== this.catChasing) {
@@ -1308,7 +1372,7 @@ export class MouseRace3D {
     }
 
     const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : 0.85;
-    vector.normalize().multiplyScalar((LEVELS[this.levelIndex].catSpeed / 24) * speedScale * delta);
+    vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.rotation.z = Math.sin(performance.now() * 0.012) * (shouldChase ? 0.14 : 0.09);
@@ -1393,7 +1457,7 @@ export class MouseRace3D {
   private updateAlice(delta: number): void {
     const level = LEVELS[this.levelIndex];
     this.aliceElapsedMs += delta * 1000;
-    const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / level.aliceTimeMs, 0, 1);
+    const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / this.getAliceTimeMs(level), 0, 1);
     this.updateAlicePosition(progress);
     this.hud.timerFill.style.transform = `scaleX(${1 - progress})`;
 
@@ -1409,6 +1473,14 @@ export class MouseRace3D {
       this.aliceElapsedMs = 0;
       this.triggerHazard("Alice reached the parmesan first!");
     }
+  }
+
+  private getCatSpeed(level: LevelDefinition): number {
+    return level.catSpeed * DIFFICULTY_SETTINGS[this.difficulty].catSpeedMultiplier;
+  }
+
+  private getAliceTimeMs(level: LevelDefinition): number {
+    return level.aliceTimeMs * DIFFICULTY_SETTINGS[this.difficulty].aliceTimeMultiplier;
   }
 
   private updateAlicePosition(progress: number): void {
@@ -1615,7 +1687,7 @@ export class MouseRace3D {
 
     this.hasSeenIntro = true;
     this.showOverlay(
-      "Race To The Cheese",
+      `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
       "Use the maze paths in real 3D space. Grab crumbs, dodge traps, watch the cat patrol, and beat Alice to the wedge.",
     );
   }
@@ -1646,7 +1718,7 @@ export class MouseRace3D {
     const level = LEVELS[this.levelIndex];
     const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, 3 - this.lives));
     this.hud.status.innerHTML =
-      `<span class="level">L${level.id} · ${level.title}</span>` +
+      `<span class="level">${DIFFICULTY_SETTINGS[this.difficulty].label} · L${level.id} · ${level.title}</span>` +
       `<span class="sep">·</span>` +
       `<span class="hearts">${hearts}</span>` +
       `<span class="sep">·</span>` +
@@ -1708,10 +1780,14 @@ export class MouseRace3D {
 
   private getStateSnapshot(): Record<string, unknown> {
     const level = LEVELS[this.levelIndex];
-    const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / level.aliceTimeMs) : 0;
+    const aliceProgress = level ? Math.min(1, this.aliceElapsedMs / this.getAliceTimeMs(level)) : 0;
     return {
       level: this.levelIndex + 1,
       title: level?.title ?? "n/a",
+      difficulty: this.difficulty,
+      difficultyLabel: DIFFICULTY_SETTINGS[this.difficulty].label,
+      aliceTimeMs: level ? this.getAliceTimeMs(level) : 0,
+      catSpeed: level ? this.getCatSpeed(level) : 0,
       lives: this.lives,
       crumbs: this.crumbs,
       extraLifeIn: EXTRA_LIFE_CRUMBS - this.extraLifeBank,
