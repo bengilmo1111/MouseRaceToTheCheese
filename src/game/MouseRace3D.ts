@@ -63,9 +63,15 @@ type MazeState = {
   mazeDepth: number;
 };
 
+type ScoutPin = {
+  element: HTMLDivElement;
+  getPosition: () => THREE.Vector3;
+  isVisible: () => boolean;
+};
+
 const PLAYER_RADIUS = 0.42;
 const CAT_RADIUS = 0.5;
-const SCOUT_PEEK_DURATION_MS = 6000;
+const SCOUT_PEEK_DURATION_MS = 12000;
 const SCOUT_CRUMBS_PER_CHARGE = 5;
 const MAX_SCOUT_PEEKS = 3;
 const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
@@ -159,6 +165,7 @@ export class MouseRace3D {
   private cameraInitialized = false;
   private catChasing = false;
   private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
+  private scoutPins: ScoutPin[] = [];
 
   private bgMusic: HTMLAudioElement;
 
@@ -183,6 +190,7 @@ export class MouseRace3D {
     timerFill: this.must<HTMLDivElement>("timer-fill"),
     timerAlice: this.must<HTMLImageElement>("timer-alice"),
     scoutButton: this.must<HTMLButtonElement>("scout-btn"),
+    scoutOverlay: this.must<HTMLDivElement>("scout-map-overlay"),
   };
   private lastGuideLabel = "";
   private lastDistanceText = "";
@@ -198,6 +206,7 @@ export class MouseRace3D {
     body: this.must<HTMLParagraphElement>("overlay-body"),
     button: this.must<HTMLButtonElement>("overlay-btn"),
   };
+  private readonly touchControls = this.must<HTMLDivElement>("touch-controls");
   private readonly playtest = {
     state: this.must<HTMLPreElement>("playtest-state"),
   };
@@ -535,6 +544,7 @@ export class MouseRace3D {
     this.hud.vignette.classList.remove("active");
     this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
+    this.rebuildScoutPins();
     this.refreshHud();
   }
 
@@ -1324,6 +1334,61 @@ export class MouseRace3D {
     return sprite;
   }
 
+  private rebuildScoutPins(): void {
+    this.hud.scoutOverlay.replaceChildren();
+    this.scoutPins = [];
+
+    this.addScoutPin("YOU", 0x45a7ff, () => this.player.position, () => true);
+    this.addScoutPin("CAT", 0xff5a5a, () => this.cat.position, () => true);
+    this.addScoutPin("CHEESE", 0xffde4f, () => this.cheese.position, () => true);
+
+    this.maze.cheeseKeys.forEach((key, index) => {
+      this.addScoutPin(`KEY ${index + 1}`, 0xb879ff, () => key.position, () => key.active);
+    });
+  }
+
+  private addScoutPin(
+    text: string,
+    color: number,
+    getPosition: () => THREE.Vector3,
+    isVisible: () => boolean,
+  ): void {
+    const element = document.createElement("div");
+    element.className = "scout-pin";
+    element.textContent = text;
+    element.style.setProperty("--pin-color", `#${color.toString(16).padStart(6, "0")}`);
+    element.hidden = true;
+    this.hud.scoutOverlay.appendChild(element);
+    this.scoutPins.push({ element, getPosition, isVisible });
+  }
+
+  private updateScoutPins(): void {
+    const scoutActive = this.isScoutPeekActive();
+    this.hud.scoutOverlay.classList.toggle("hidden", !scoutActive);
+    this.hud.scoutOverlay.setAttribute("aria-hidden", String(!scoutActive));
+    this.touchControls.classList.toggle("scout-hidden", scoutActive);
+    const overlayWidth = this.hud.scoutOverlay.clientWidth || window.innerWidth;
+    const overlayHeight = this.hud.scoutOverlay.clientHeight || window.innerHeight;
+    const projected = new THREE.Vector3();
+
+    for (const pin of this.scoutPins) {
+      const visible = scoutActive && pin.isVisible();
+      pin.element.hidden = !visible;
+      if (!visible) {
+        continue;
+      }
+
+      const position = pin.getPosition();
+      projected.copy(position);
+      projected.y = 3.25;
+      projected.project(this.camera);
+      const x = THREE.MathUtils.clamp((projected.x * 0.5 + 0.5) * overlayWidth, 70, overlayWidth - 70);
+      const y = THREE.MathUtils.clamp((-projected.y * 0.5 + 0.5) * overlayHeight, 108, overlayHeight - 120);
+      pin.element.style.left = `${x}px`;
+      pin.element.style.top = `${y}px`;
+    }
+  }
+
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
@@ -1341,6 +1406,7 @@ export class MouseRace3D {
 
     this.updatePickupBursts(delta);
     this.updateGuideTrail();
+    this.updateScoutPins();
     this.animateMouse();
 
     this.playtestTick += 1;
@@ -2009,30 +2075,62 @@ export class MouseRace3D {
   private updateScoutCamera(): void {
     this.wasScoutPeekActive = true;
     this.cameraYaw = 0;
-    const targetFov = 68;
+    const targetFov = 50;
     const verticalFovRad = THREE.MathUtils.degToRad(targetFov);
     const horizontalFovRad = 2 * Math.atan(Math.tan(verticalFovRad / 2) * this.camera.aspect);
     const limitingFov = Math.max(THREE.MathUtils.degToRad(24), Math.min(verticalFovRad, horizontalFovRad));
     const mazeRadius = Math.hypot(this.maze.mazeWidth, this.maze.mazeDepth) * 0.5;
-    const scoutDistance = Math.max(mazeRadius / Math.sin(limitingFov / 2), mazeRadius * 1.35);
-    const scoutDirection = new THREE.Vector3(0, 1, 0.32).normalize();
+    const focus = this.getScoutFocus();
+    const scoutDistance = THREE.MathUtils.clamp(
+      focus.radius / Math.sin(limitingFov / 2),
+      24,
+      mazeRadius * 3.2,
+    );
+    const scoutDirection = new THREE.Vector3(0, 1, 0.01).normalize();
 
-    this.cameraTarget.copy(this.maze.mazeCenter).addScaledVector(scoutDirection, scoutDistance);
+    this.cameraTarget.copy(focus.center).addScaledVector(scoutDirection, scoutDistance);
     this.camera.position.lerp(this.cameraTarget, this.cameraInitialized ? 0.18 : 1);
     this.cameraInitialized = true;
-    this.camera.up.set(0, 1, 0);
-    this.camera.lookAt(this.maze.mazeCenter.x, 0, this.maze.mazeCenter.z);
+    this.camera.up.set(0, 0, -1);
+    this.camera.lookAt(focus.center.x, 0, focus.center.z);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.14);
     this.camera.far = Math.max(600, scoutDistance + mazeRadius + 60);
     this.camera.updateProjectionMatrix();
 
     const fog = this.scene.fog;
     if (fog instanceof THREE.Fog) {
-      fog.near = Math.max(30, scoutDistance - mazeRadius * 0.25);
+      fog.near = Math.max(40, scoutDistance - focus.radius * 0.2);
       fog.far = scoutDistance + mazeRadius + 80;
     }
 
     this.refreshScoutButton();
+  }
+
+  private getScoutFocus(): { center: THREE.Vector3; radius: number } {
+    const points = [this.player.position, this.cheese.position];
+    const nextKey = this.getNearestActiveCheeseKey();
+    if (nextKey) {
+      points.push(nextKey.position);
+    }
+    points.push(this.cat.position);
+
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minZ = Math.min(...points.map((point) => point.z));
+    const maxZ = Math.max(...points.map((point) => point.z));
+    const center = new THREE.Vector3((minX + maxX) * 0.5, 0, (minZ + maxZ) * 0.5);
+    const width = Math.max(12, maxX - minX + this.tileSize * 5);
+    const depth = Math.max(12, maxZ - minZ + this.tileSize * 5);
+    return {
+      center,
+      radius: Math.min(Math.hypot(this.maze.mazeWidth, this.maze.mazeDepth) * 0.5, Math.hypot(width, depth) * 0.5),
+    };
+  }
+
+  private getNearestActiveCheeseKey(): MazePickup | undefined {
+    return this.maze.cheeseKeys
+      .filter((key) => key.active)
+      .sort((a, b) => a.position.distanceToSquared(this.player.position) - b.position.distanceToSquared(this.player.position))[0];
   }
 
   private updateCamera(_delta: number): void {
@@ -2381,6 +2479,12 @@ export class MouseRace3D {
         z: Number(this.player.position.z.toFixed(2)),
         headingDeg: Number(THREE.MathUtils.radToDeg(this.playerHeading).toFixed(1)),
       },
+      camera: {
+        x: Number(this.camera.position.x.toFixed(2)),
+        y: Number(this.camera.position.y.toFixed(2)),
+        z: Number(this.camera.position.z.toFixed(2)),
+        fov: Number(this.camera.fov.toFixed(1)),
+      },
       cat: {
         x: Number(this.cat.position.x.toFixed(2)),
         z: Number(this.cat.position.z.toFixed(2)),
@@ -2397,6 +2501,7 @@ export class MouseRace3D {
       scoutPeeks: this.scoutPeeks,
       scoutCrumbsUntilNext: Math.max(0, SCOUT_CRUMBS_PER_CHARGE - this.scoutCrumbBank),
       scoutActive: this.isScoutPeekActive(),
+      scoutPinsVisible: this.scoutPins.filter((pin) => !pin.element.hidden).length,
       guideTrailActive: Boolean(this.guideTrail),
       guideTrailTarget: this.guideTrailTarget,
       gemPairs: this.maze?.gems.map((gem, index) => `${index}->${gem.pairIndex ?? "none"}`) ?? [],
