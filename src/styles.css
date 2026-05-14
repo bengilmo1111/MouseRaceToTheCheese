@@ -220,6 +220,45 @@ input {
   color: #ffe2d2;
 }
 
+.scout-map-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.scout-pin {
+  --pin-color: #3f9cff;
+  position: absolute;
+  min-width: 70px;
+  padding: 7px 10px 8px;
+  border: 3px solid var(--pin-color);
+  border-radius: 14px;
+  background: rgba(255, 252, 238, 0.94);
+  color: #3a2811;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: 0 8px 18px rgba(39, 24, 7, 0.24);
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.scout-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  width: 14px;
+  height: 14px;
+  border-right: 3px solid var(--pin-color);
+  border-bottom: 3px solid var(--pin-color);
+  background: rgba(255, 252, 238, 0.94);
+  transform: translateX(-50%) rotate(45deg);
+}
+
 #timer-fill {
   width: 100%;
   height: 100%;
@@ -414,6 +453,10 @@ input {
 
 #touch-controls.show {
   display: block;
+}
+
+#touch-controls.scout-hidden {
+  display: none;
 }
 
 .touch-pad {
