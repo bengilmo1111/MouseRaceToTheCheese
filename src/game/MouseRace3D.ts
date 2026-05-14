@@ -570,16 +570,18 @@ export class MouseRace3D {
     let catPoint = new THREE.Vector3();
     let crumbIndex = 0;
 
-    const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(width + 2.4, 0.5, depth + 2.4),
-      new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 }),
-    );
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(width + 2.4, 0.5, depth + 2.4), this.createFloorMaterial(level, width, depth));
     floor.position.set(0, -0.28, 0);
     floor.receiveShadow = true;
     group.add(floor);
 
-    const wallTopMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallTop, roughness: 0.72 });
-    const wallSideMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallSide, roughness: 0.88 });
+    const wallMaterials = this.createWallMaterials(level);
+    const wallScale = 0.94;
+    const wallHeight = level.theme.wallStyle === "cardboard" ? 1.45 : 2.4;
+    const tapeMaterial =
+      level.theme.wallStyle === "cardboard"
+        ? new THREE.MeshStandardMaterial({ color: 0xe7c783, roughness: 0.9, transparent: true, opacity: 0.82 })
+        : undefined;
 
     level.map.forEach((line, row) => {
       [...line].forEach((cell, col) => {
@@ -587,19 +589,71 @@ export class MouseRace3D {
         const z = originZ + row * this.tileSize;
 
         if (cell === "#") {
+          if (level.theme.wallStyle === "cardboard") {
+            const hasHorizontal = level.map[row]?.[col - 1] === "#" || level.map[row]?.[col + 1] === "#";
+            const hasVertical = level.map[row - 1]?.[col] === "#" || level.map[row + 1]?.[col] === "#";
+            const panelLength = this.tileSize * 1.02;
+            const panelThickness = this.tileSize * 0.16;
+
+            if (hasHorizontal || !hasVertical) {
+              const wall = new THREE.Mesh(
+                new THREE.BoxGeometry(panelLength, wallHeight, panelThickness),
+                wallMaterials,
+              );
+              wall.position.set(x, wallHeight * 0.5 - 0.02, z);
+              wall.castShadow = true;
+              wall.receiveShadow = true;
+              group.add(wall);
+              if (tapeMaterial && (row + col) % 7 === 0) {
+                this.addCardboardTape(group, x, z, panelLength * 0.42, panelThickness * 0.55, wallHeight, tapeMaterial, false);
+              }
+              walls.push({
+                minX: x - panelLength * 0.5,
+                maxX: x + panelLength * 0.5,
+                minZ: z - panelThickness * 0.5,
+                maxZ: z + panelThickness * 0.5,
+              });
+            }
+
+            if (hasVertical) {
+              const wall = new THREE.Mesh(
+                new THREE.BoxGeometry(panelThickness, wallHeight, panelLength),
+                wallMaterials,
+              );
+              wall.position.set(x, wallHeight * 0.5 - 0.02, z);
+              wall.castShadow = true;
+              wall.receiveShadow = true;
+              group.add(wall);
+              if (tapeMaterial && (row + col) % 7 === 3) {
+                this.addCardboardTape(group, x, z, panelThickness * 0.55, panelLength * 0.42, wallHeight, tapeMaterial, true);
+              }
+              walls.push({
+                minX: x - panelThickness * 0.5,
+                maxX: x + panelThickness * 0.5,
+                minZ: z - panelLength * 0.5,
+                maxZ: z + panelLength * 0.5,
+              });
+            }
+            return;
+          }
+
+          const wallHalfSize = (this.tileSize * wallScale) / 2;
           const wall = new THREE.Mesh(
-            new THREE.BoxGeometry(this.tileSize * 0.94, 2.4, this.tileSize * 0.94),
-            [wallSideMaterial, wallSideMaterial, wallTopMaterial, wallSideMaterial, wallSideMaterial, wallSideMaterial],
+            new THREE.BoxGeometry(this.tileSize * wallScale, wallHeight, this.tileSize * wallScale),
+            wallMaterials,
           );
-          wall.position.set(x, 1.18, z);
+          wall.position.set(x, wallHeight * 0.5 - 0.02, z);
           wall.castShadow = true;
           wall.receiveShadow = true;
           group.add(wall);
+          if (tapeMaterial && (row + col) % 5 === 0) {
+            this.addCardboardTape(group, x, z, wallHalfSize, wallHalfSize, wallHeight, tapeMaterial, (row + col) % 2 === 0);
+          }
           walls.push({
-            minX: x - this.tileSize * 0.47,
-            maxX: x + this.tileSize * 0.47,
-            minZ: z - this.tileSize * 0.47,
-            maxZ: z + this.tileSize * 0.47,
+            minX: x - wallHalfSize,
+            maxX: x + wallHalfSize,
+            minZ: z - wallHalfSize,
+            maxZ: z + wallHalfSize,
           });
           return;
         }
@@ -1387,6 +1441,121 @@ export class MouseRace3D {
       pin.element.style.left = `${x}px`;
       pin.element.style.top = `${y}px`;
     }
+  }
+
+  private createFloorMaterial(level: LevelDefinition, width: number, depth: number): THREE.Material {
+    if (level.theme.wallStyle !== "cardboard") {
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 });
+    }
+
+    const map = this.createCardboardTexture("floor");
+    map.repeat.set(Math.max(6, width / 8), Math.max(6, depth / 8));
+    return new THREE.MeshStandardMaterial({
+      color: level.theme.floor,
+      map,
+      roughness: 0.98,
+    });
+  }
+
+  private createWallMaterials(level: LevelDefinition): THREE.Material[] {
+    if (level.theme.wallStyle !== "cardboard") {
+      const wallTopMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallTop, roughness: 0.72 });
+      const wallSideMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallSide, roughness: 0.88 });
+      return [wallSideMaterial, wallSideMaterial, wallTopMaterial, wallSideMaterial, wallSideMaterial, wallSideMaterial];
+    }
+
+    const sideMap = this.createCardboardTexture("side");
+    const topMap = this.createCardboardTexture("top");
+    const wallSideMaterial = new THREE.MeshStandardMaterial({
+      color: level.theme.wallSide,
+      map: sideMap,
+      emissive: 0x5b3518,
+      emissiveIntensity: 0.1,
+      roughness: 0.96,
+      bumpMap: sideMap,
+      bumpScale: 0.035,
+    });
+    const wallTopMaterial = new THREE.MeshStandardMaterial({
+      color: level.theme.wallTop,
+      map: topMap,
+      roughness: 0.98,
+      bumpMap: topMap,
+      bumpScale: 0.025,
+    });
+    return [wallSideMaterial, wallSideMaterial, wallTopMaterial, wallSideMaterial, wallSideMaterial, wallSideMaterial];
+  }
+
+  private createCardboardTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    const base = kind === "side" ? "#cf9557" : kind === "top" ? "#dba45d" : "#d5a760";
+    const fiber = kind === "side" ? "#8f5f33" : "#9b6a33";
+    const highlight = kind === "side" ? "#efbd7d" : "#edc27a";
+    context.fillStyle = base;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    context.globalAlpha = 0.28;
+    for (let y = 0; y < canvas.height; y += kind === "side" ? 9 : 15) {
+      context.fillStyle = y % 2 === 0 ? highlight : fiber;
+      context.fillRect(0, y, canvas.width, kind === "side" ? 2 : 1);
+    }
+
+    context.globalAlpha = 0.22;
+    for (let i = 0; i < 120; i += 1) {
+      const x = Math.random() * canvas.width;
+      const y = Math.random() * canvas.height;
+      const length = 8 + Math.random() * 28;
+      context.strokeStyle = Math.random() > 0.5 ? fiber : highlight;
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x + length, y + (Math.random() - 0.5) * 5);
+      context.stroke();
+    }
+
+    if (kind === "top") {
+      context.globalAlpha = 0.25;
+      context.strokeStyle = "#775028";
+      context.lineWidth = 3;
+      context.setLineDash([18, 12]);
+      context.beginPath();
+      context.moveTo(18, 28);
+      context.lineTo(238, 228);
+      context.stroke();
+      context.setLineDash([]);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private addCardboardTape(
+    group: THREE.Group,
+    x: number,
+    z: number,
+    halfX: number,
+    halfZ: number,
+    wallHeight: number,
+    material: THREE.Material,
+    rotate: boolean,
+  ): void {
+    const tape = new THREE.Mesh(
+      new THREE.BoxGeometry(rotate ? 0.12 : halfX * 1.55, 0.035, rotate ? halfZ * 1.55 : 0.12),
+      material,
+    );
+    tape.position.set(x, wallHeight + 0.015, z);
+    tape.receiveShadow = true;
+    group.add(tape);
   }
 
   private animate = (): void => {
