@@ -1,5 +1,6 @@
 export type LevelTheme = {
   name: string;
+  wallStyle?: "cardboard";
   skyTop: string;
   skyBottom: string;
   floor: number;
@@ -24,21 +25,22 @@ export type LevelDefinition = {
 export const LEVELS: LevelDefinition[] = [
   {
     id: 1,
-    title: "Cheese Labyrinth",
+    title: "Cardboard Cheese Run",
     aliceTimeMs: 300000,
     catSpeed: 88,
     theme: {
-      name: "Cheese",
-      skyTop: "#ffd966",
-      skyBottom: "#fff2cc",
-      floor: 0xffe599,
-      wallTop: 0xf1c232,
-      wallSide: 0xbf9000,
-      accent: 0xff9900,
+      name: "Cardboard",
+      wallStyle: "cardboard",
+      skyTop: "#f0c987",
+      skyBottom: "#fff0c8",
+      floor: 0xd7a45c,
+      wallTop: 0xd79c4b,
+      wallSide: 0xc99152,
+      accent: 0xf4b13e,
       hazard: 0xcc0000,
-      trim: 0x7f6000,
-      hud: "#b45f06",
-      fog: 0xfff2cc,
+      trim: 0x745029,
+      hud: "#6d471f",
+      fog: 0xffe7b5,
     },
     map: [
       "#########################################",
