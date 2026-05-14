@@ -16,6 +16,7 @@ type DifficultySettings = {
   chaseRangeMultiplier: number;
   startingLives: number;
   extraLifeCrumbs: number;
+  greenCrumbInterval: number;
   requiredKeyLimit?: number;
   forgivingHits: boolean;
 };
@@ -32,6 +33,7 @@ type MazePickup = {
   position: THREE.Vector3;
   active: boolean;
   pairIndex?: number;
+  guideCrumb?: boolean;
 };
 
 type MazeHazard = {
@@ -40,6 +42,11 @@ type MazeHazard = {
 };
 
 type MazeState = {
+  map: string[];
+  originX: number;
+  originZ: number;
+  rows: number;
+  cols: number;
   walls: WallRect[];
   crumbs: MazePickup[];
   traps: MazeHazard[];
@@ -70,6 +77,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     chaseRangeMultiplier: 0.68,
     startingLives: 5,
     extraLifeCrumbs: 2,
+    greenCrumbInterval: 4,
     requiredKeyLimit: 1,
     forgivingHits: true,
   },
@@ -80,6 +88,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     chaseRangeMultiplier: 0.9,
     startingLives: 4,
     extraLifeCrumbs: 3,
+    greenCrumbInterval: 7,
     requiredKeyLimit: 2,
     forgivingHits: false,
   },
@@ -90,6 +99,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     chaseRangeMultiplier: 1,
     startingLives: 3,
     extraLifeCrumbs: 3,
+    greenCrumbInterval: 11,
     forgivingHits: false,
   },
 };
@@ -176,6 +186,9 @@ export class MouseRace3D {
   };
   private lastGuideLabel = "";
   private lastDistanceText = "";
+  private guideTrail?: THREE.Group;
+  private guideTrailUntil = 0;
+  private guideTrailTarget = "";
   private readonly pickupBursts: { mesh: THREE.Points; ageMs: number; lifeMs: number }[] = [];
 
   private readonly startScreen = this.must<HTMLDivElement>("start-screen");
@@ -427,6 +440,7 @@ export class MouseRace3D {
       reset: () => this.startRun(false),
       advance: () => this.advanceOverlayFlow(),
       warpCrumb: () => this.warpToPickup("crumb"),
+      warpGreenCrumb: () => this.warpToPickup("greenCrumb"),
       warpGem: () => this.warpToPickup("gem"),
       warpTrap: () => this.warpToHazard("trap"),
       warpCheese: () => this.warpToCheese(),
@@ -447,6 +461,7 @@ export class MouseRace3D {
     this.must<HTMLButtonElement>("ptest-left").addEventListener("click", () => this.stepMove("left"));
     this.must<HTMLButtonElement>("ptest-right").addEventListener("click", () => this.stepMove("right"));
     this.must<HTMLButtonElement>("ptest-crumb").addEventListener("click", () => this.warpToPickup("crumb"));
+    this.must<HTMLButtonElement>("ptest-green-crumb").addEventListener("click", () => this.warpToPickup("greenCrumb"));
     this.must<HTMLButtonElement>("ptest-gem").addEventListener("click", () => this.warpToPickup("gem"));
     this.must<HTMLButtonElement>("ptest-trap").addEventListener("click", () => this.warpToHazard("trap"));
     this.must<HTMLButtonElement>("ptest-cheese").addEventListener("click", () => this.warpToCheese());
@@ -494,6 +509,7 @@ export class MouseRace3D {
     this.scoutPeeks = Math.min(MAX_SCOUT_PEEKS, Math.max(this.scoutPeeks, 1));
     this.scoutPeekUntil = 0;
     this.wasScoutPeekActive = false;
+    this.clearGuideTrail();
 
     if (this.maze) {
       this.scene.remove(this.maze.levelGroup);
@@ -542,6 +558,7 @@ export class MouseRace3D {
     let startPoint = new THREE.Vector3();
     let cheesePoint = new THREE.Vector3();
     let catPoint = new THREE.Vector3();
+    let crumbIndex = 0;
 
     const floor = new THREE.Mesh(
       new THREE.BoxGeometry(width + 2.4, 0.5, depth + 2.4),
@@ -578,6 +595,8 @@ export class MouseRace3D {
         }
 
         if (cell === ".") {
+          crumbIndex += 1;
+          const isGuideCrumb = crumbIndex % DIFFICULTY_SETTINGS[this.difficulty].greenCrumbInterval === 0;
           const crumbGeom = new THREE.IcosahedronGeometry(0.18, 0);
           const posAttr = crumbGeom.getAttribute("position") as THREE.BufferAttribute;
           for (let v = 0; v < posAttr.count; v += 1) {
@@ -588,18 +607,34 @@ export class MouseRace3D {
           const crumbMesh = new THREE.Mesh(
             crumbGeom,
             new THREE.MeshStandardMaterial({
-              color: 0xf2d27a,
-              emissive: 0xb98328,
-              emissiveIntensity: 0.18,
+              color: isGuideCrumb ? 0x77f27a : 0xf2d27a,
+              emissive: isGuideCrumb ? 0x24bf4f : 0xb98328,
+              emissiveIntensity: isGuideCrumb ? 0.65 : 0.18,
               roughness: 0.85,
               flatShading: true,
             }),
           );
           crumbMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+          crumbMesh.scale.setScalar(isGuideCrumb ? 1.18 : 1);
           crumbMesh.castShadow = true;
           crumbMesh.position.set(x, 0.18, z);
+          if (isGuideCrumb) {
+            const glow = new THREE.Mesh(
+              new THREE.RingGeometry(0.32, 0.46, 24),
+              new THREE.MeshBasicMaterial({
+                color: 0x5cff80,
+                transparent: true,
+                opacity: 0.5,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+              }),
+            );
+            glow.rotation.x = -Math.PI / 2;
+            glow.position.y = -0.14;
+            crumbMesh.add(glow);
+          }
           group.add(crumbMesh);
-          crumbs.push({ mesh: crumbMesh, position: crumbMesh.position.clone(), active: true });
+          crumbs.push({ mesh: crumbMesh, position: crumbMesh.position.clone(), active: true, guideCrumb: isGuideCrumb });
           return;
         }
 
@@ -705,6 +740,11 @@ export class MouseRace3D {
     group.add(aliceLane);
 
     return {
+      map: level.map,
+      originX,
+      originZ,
+      rows,
+      cols,
       walls,
       crumbs,
       traps,
@@ -1300,6 +1340,7 @@ export class MouseRace3D {
     }
 
     this.updatePickupBursts(delta);
+    this.updateGuideTrail();
     this.animateMouse();
 
     this.playtestTick += 1;
@@ -1332,15 +1373,18 @@ export class MouseRace3D {
     this.updatePlaytestState();
   }
 
-  private warpToPickup(kind: "crumb" | "gem"): void {
+  private warpToPickup(kind: "crumb" | "greenCrumb" | "gem"): void {
     if (!this.maze) {
       return;
     }
 
-    const pool = kind === "crumb" ? this.maze.crumbs : this.maze.gems;
+    const pool =
+      kind === "gem"
+        ? this.maze.gems
+        : this.maze.crumbs.filter((item) => (kind === "greenCrumb" ? item.guideCrumb : !item.guideCrumb));
     const target = pool.find((item) => item.active);
     if (!target) {
-      this.flashHint(`No active ${kind} found.`);
+      this.flashHint(`No active ${kind === "greenCrumb" ? "green crumb" : kind} found.`);
       return;
     }
 
@@ -1518,6 +1562,9 @@ export class MouseRace3D {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
       crumb.mesh.rotation.y += 0.03;
+      if (crumb.guideCrumb) {
+        crumb.mesh.position.y = 0.22 + Math.sin(performance.now() * 0.005 + crumb.position.x) * 0.04;
+      }
       if (this.player.position.distanceToSquared(crumb.position) < 0.85 * 0.85) {
         crumb.active = false;
         crumb.mesh.visible = false;
@@ -1533,7 +1580,10 @@ export class MouseRace3D {
           this.audio.playCrumb();
         }
         this.collectScoutCrumb();
-        this.spawnPickupBurst(crumb.position, 0xffe084);
+        if (crumb.guideCrumb) {
+          this.revealObjectivePath();
+        }
+        this.spawnPickupBurst(crumb.position, crumb.guideCrumb ? 0x65ff87 : 0xffe084);
         this.refreshHud();
       }
     }
@@ -1598,6 +1648,249 @@ export class MouseRace3D {
 
   private remainingRequiredCheeseKeys(): number {
     return Math.max(0, this.totalRequiredCheeseKeys() - this.collectedCheeseKeys);
+  }
+
+  private revealObjectivePath(): void {
+    const objective = this.getNextObjectivePath();
+    if (!objective) {
+      this.flashHint("Green crumb found. The cheese is already close.");
+      return;
+    }
+
+    this.renderGuideTrail(objective.path);
+    this.guideTrailUntil = performance.now() + 9000;
+    this.guideTrailTarget = objective.label;
+    this.flashHint(`Green crumb trail: follow it to the ${objective.label}.`);
+    this.audio.playGem();
+  }
+
+  private getNextObjectivePath(): { label: string; path: THREE.Vector3[] } | undefined {
+    if (!this.maze) {
+      return undefined;
+    }
+
+    const targets =
+      this.remainingRequiredCheeseKeys() > 0
+        ? this.maze.cheeseKeys.filter((key) => key.active).map((key) => ({ label: "key", position: key.position }))
+        : [{ label: "cheese", position: this.cheese.position }];
+
+    let best: { label: string; path: THREE.Vector3[] } | undefined;
+    for (const target of targets) {
+      const path = this.findGridPath(this.player.position, target.position);
+      if (!path.length) {
+        continue;
+      }
+      if (!best || path.length < best.path.length) {
+        best = { label: target.label, path };
+      }
+    }
+
+    return best;
+  }
+
+  private findGridPath(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] {
+    const start = this.nearestWalkableCell(from);
+    const goal = this.nearestWalkableCell(to);
+    if (!start || !goal) {
+      return [];
+    }
+
+    const queue: { row: number; col: number }[] = [start];
+    const visited = new Set<string>([`${start.row},${start.col}`]);
+    const parent = new Map<string, string>();
+    const directions = [
+      { row: -1, col: 0 },
+      { row: 1, col: 0 },
+      { row: 0, col: -1 },
+      { row: 0, col: 1 },
+    ];
+    let foundKey = "";
+
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current) {
+        break;
+      }
+
+      const currentKey = `${current.row},${current.col}`;
+      if (current.row === goal.row && current.col === goal.col) {
+        foundKey = currentKey;
+        break;
+      }
+
+      for (const direction of directions) {
+        const next = { row: current.row + direction.row, col: current.col + direction.col };
+        const nextKey = `${next.row},${next.col}`;
+        if (visited.has(nextKey) || !this.isWalkableCell(next.row, next.col)) {
+          continue;
+        }
+
+        visited.add(nextKey);
+        parent.set(nextKey, currentKey);
+        queue.push(next);
+      }
+    }
+
+    if (!foundKey) {
+      return [];
+    }
+
+    const cells: { row: number; col: number }[] = [];
+    let key = foundKey;
+    while (key) {
+      const [row, col] = key.split(",").map(Number);
+      cells.push({ row, col });
+      if (key === `${start.row},${start.col}`) {
+        break;
+      }
+      key = parent.get(key) ?? "";
+    }
+
+    return cells.reverse().map((cell) => this.cellCenter(cell.row, cell.col, 0.13));
+  }
+
+  private nearestWalkableCell(position: THREE.Vector3): { row: number; col: number } | undefined {
+    const centerRow = THREE.MathUtils.clamp(
+      Math.round((position.z - this.maze.originZ) / this.tileSize),
+      0,
+      this.maze.rows - 1,
+    );
+    const centerCol = THREE.MathUtils.clamp(
+      Math.round((position.x - this.maze.originX) / this.tileSize),
+      0,
+      this.maze.cols - 1,
+    );
+
+    if (this.isWalkableCell(centerRow, centerCol)) {
+      return { row: centerRow, col: centerCol };
+    }
+
+    for (let radius = 1; radius < Math.max(this.maze.rows, this.maze.cols); radius += 1) {
+      for (let row = centerRow - radius; row <= centerRow + radius; row += 1) {
+        for (let col = centerCol - radius; col <= centerCol + radius; col += 1) {
+          if (Math.abs(row - centerRow) !== radius && Math.abs(col - centerCol) !== radius) {
+            continue;
+          }
+          if (this.isWalkableCell(row, col)) {
+            return { row, col };
+          }
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private isWalkableCell(row: number, col: number): boolean {
+    return row >= 0 && row < this.maze.rows && col >= 0 && col < this.maze.cols && this.maze.map[row]?.[col] !== "#";
+  }
+
+  private cellCenter(row: number, col: number, y: number): THREE.Vector3 {
+    return new THREE.Vector3(this.maze.originX + col * this.tileSize, y, this.maze.originZ + row * this.tileSize);
+  }
+
+  private renderGuideTrail(path: THREE.Vector3[]): void {
+    this.clearGuideTrail();
+    if (path.length < 2) {
+      return;
+    }
+
+    const trail = new THREE.Group();
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(path),
+      new THREE.LineBasicMaterial({
+        color: 0x00d84a,
+        transparent: true,
+        opacity: 1,
+      }),
+    );
+    trail.add(line);
+
+    const dotGeometry = new THREE.CircleGeometry(0.28, 24);
+    const dotMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00d84a,
+      transparent: true,
+      opacity: 1,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const pulseMaterial = new THREE.MeshBasicMaterial({
+      color: 0xb8ff47,
+      transparent: true,
+      opacity: 1,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    path.slice(1).forEach((point, index) => {
+      if (index % 2 !== 0 && index !== path.length - 2) {
+        return;
+      }
+      const isPulseDot = index % 4 === 0;
+      const dot = new THREE.Mesh(
+        isPulseDot ? new THREE.CircleGeometry(0.42, 24) : dotGeometry,
+        isPulseDot ? pulseMaterial : dotMaterial,
+      );
+      dot.rotation.x = -Math.PI / 2;
+      dot.position.copy(point);
+      dot.position.y = 0.11 + (index % 4 === 0 ? 0.02 : 0);
+      trail.add(dot);
+    });
+
+    this.scene.add(trail);
+    this.guideTrail = trail;
+  }
+
+  private updateGuideTrail(): void {
+    if (!this.guideTrail) {
+      return;
+    }
+
+    const remainingMs = this.guideTrailUntil - performance.now();
+    if (remainingMs <= 0) {
+      this.clearGuideTrail();
+      return;
+    }
+
+    const opacityScale = THREE.MathUtils.clamp(remainingMs / 1800, 0.45, 1);
+    const pulse = 0.9 + Math.sin(performance.now() * 0.008) * 0.1;
+    this.guideTrail.traverse((object) => {
+      const material = object instanceof THREE.Line ? object.material : object instanceof THREE.Mesh ? object.material : undefined;
+      if (!material) {
+        return;
+      }
+      const materials = Array.isArray(material) ? material : [material];
+      materials.forEach((item) => {
+        if ("opacity" in item) {
+          item.opacity = opacityScale * pulse;
+        }
+      });
+    });
+  }
+
+  private clearGuideTrail(): void {
+    if (!this.guideTrail) {
+      this.guideTrailTarget = "";
+      this.guideTrailUntil = 0;
+      return;
+    }
+
+    this.scene.remove(this.guideTrail);
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    this.guideTrail.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+        geometries.add(object.geometry);
+        const material = object.material;
+        const objectMaterials = Array.isArray(material) ? material : [material];
+        objectMaterials.forEach((item) => materials.add(item));
+      }
+    });
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
+    this.guideTrail = undefined;
+    this.guideTrailTarget = "";
+    this.guideTrailUntil = 0;
   }
 
   private teleportFromGem(gem: MazePickup): void {
@@ -1973,7 +2266,7 @@ export class MouseRace3D {
     this.hasSeenIntro = true;
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
-      `${this.getIntroTip()} Use the maze paths in real 3D space. Grab crumbs, collect cheese keys, dodge traps, use paired teleport gems, watch the cat patrol, use scout peeks to zoom up when lost, and beat Alice to the wedge.`,
+      `${this.getIntroTip()} Use the maze paths in real 3D space. Grab crumbs, collect green crumbs to reveal a trail, collect cheese keys, dodge traps, use paired teleport gems, watch the cat patrol, use scout peeks to zoom up when lost, and beat Alice to the wedge.`,
     );
   }
 
@@ -2097,12 +2390,15 @@ export class MouseRace3D {
         z: Number(this.cheese.position.z.toFixed(2)),
       },
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
+      remainingGreenCrumbs: this.maze?.crumbs.filter((item) => item.active && item.guideCrumb).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
       remainingCheeseKeys: this.maze?.cheeseKeys.filter((item) => item.active).length ?? 0,
       requiredCheeseKeysLeft: this.maze ? this.remainingRequiredCheeseKeys() : 0,
       scoutPeeks: this.scoutPeeks,
       scoutCrumbsUntilNext: Math.max(0, SCOUT_CRUMBS_PER_CHARGE - this.scoutCrumbBank),
       scoutActive: this.isScoutPeekActive(),
+      guideTrailActive: Boolean(this.guideTrail),
+      guideTrailTarget: this.guideTrailTarget,
       gemPairs: this.maze?.gems.map((gem, index) => `${index}->${gem.pairIndex ?? "none"}`) ?? [],
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
