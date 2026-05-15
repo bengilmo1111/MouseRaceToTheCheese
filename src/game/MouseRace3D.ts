@@ -119,6 +119,15 @@ export class MouseRace3D {
   private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly clock = new THREE.Clock();
+  private sceneLighting!: {
+    hemi: THREE.HemisphereLight;
+    sun: THREE.DirectionalLight;
+    rim: THREE.DirectionalLight;
+    ambient: THREE.AmbientLight;
+    floorGlow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+    island: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshStandardMaterial>;
+    playerLight: THREE.PointLight;
+  };
   private readonly tileSize = 2.6;
   private readonly moveSpeed = 6.0;
   private readonly accel = 18;
@@ -292,6 +301,12 @@ export class MouseRace3D {
     island.position.y = -1;
     island.receiveShadow = true;
     this.scene.add(island);
+
+    const playerLight = new THREE.PointLight(0xfff0c0, 0, 18, 0.85);
+    playerLight.position.set(0, 2.2, 0);
+    this.scene.add(playerLight);
+
+    this.sceneLighting = { hemi, sun, rim, ambient, floorGlow, island, playerLight };
 
     this.player = this.buildMouse();
     this.cat = this.buildCat();
@@ -1504,13 +1519,13 @@ export class MouseRace3D {
       const map = this.createStoneTexture("floor");
       const [rx, ry] = rep(width, depth);
       map.repeat.set(rx, ry);
-      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.97, bumpMap: map, bumpScale: 0.03 });
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.97, bumpMap: map, bumpScale: 0.03, emissive: level.theme.floor, emissiveIntensity: 0.08 });
     }
     if (level.theme.wallStyle === "bamboo") {
       const map = this.createBambooTexture("floor");
       const [rx, ry] = rep(width, depth);
       map.repeat.set(rx, ry);
-      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.96 });
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.96, emissive: level.theme.floor, emissiveIntensity: 0.08 });
     }
     if (level.theme.wallStyle === "metal") {
       const map = this.createMetalTexture("floor");
@@ -1521,8 +1536,8 @@ export class MouseRace3D {
         map,
         roughness: 0.3,
         metalness: 0.7,
-        emissive: 0x001133,
-        emissiveIntensity: 0.15,
+        emissive: 0x003366,
+        emissiveIntensity: 0.32,
       });
     }
     return new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 });
@@ -1546,10 +1561,13 @@ export class MouseRace3D {
       const topMap = this.createStoneTexture("top");
       const side = new THREE.MeshStandardMaterial({
         color: level.theme.wallSide, map: sideMap, roughness: 0.94,
+        emissive: level.theme.wallSide, emissiveIntensity: 0.07,
         bumpMap: sideMap, bumpScale: 0.06,
       });
       const top = new THREE.MeshStandardMaterial({
-        color: level.theme.wallTop, map: topMap, roughness: 0.98, bumpMap: topMap, bumpScale: 0.04,
+        color: level.theme.wallTop, map: topMap, roughness: 0.98,
+        emissive: level.theme.wallTop, emissiveIntensity: 0.06,
+        bumpMap: topMap, bumpScale: 0.04,
       });
       return [side, side, top, side, side, side];
     }
@@ -1558,10 +1576,12 @@ export class MouseRace3D {
       const topMap = this.createBambooTexture("top");
       const side = new THREE.MeshStandardMaterial({
         color: level.theme.wallSide, map: sideMap, roughness: 0.82,
+        emissive: level.theme.wallSide, emissiveIntensity: 0.08,
         bumpMap: sideMap, bumpScale: 0.04,
       });
       const top = new THREE.MeshStandardMaterial({
         color: level.theme.wallTop, map: topMap, roughness: 0.88,
+        emissive: level.theme.wallTop, emissiveIntensity: 0.07,
       });
       return [side, side, top, side, side, side];
     }
@@ -1573,8 +1593,8 @@ export class MouseRace3D {
         map: sideMap,
         roughness: 0.22,
         metalness: 0.85,
-        emissive: 0x001844,
-        emissiveIntensity: 0.12,
+        emissive: 0x0066aa,
+        emissiveIntensity: 0.3,
         bumpMap: sideMap,
         bumpScale: 0.02,
       });
@@ -1583,8 +1603,8 @@ export class MouseRace3D {
         map: topMap,
         roughness: 0.18,
         metalness: 0.9,
-        emissive: 0x002266,
-        emissiveIntensity: 0.1,
+        emissive: 0x0088cc,
+        emissiveIntensity: 0.28,
       });
       return [side, side, top, side, side, side];
     }
@@ -2115,6 +2135,7 @@ export class MouseRace3D {
     this.updateGuideTrail(now);
     this.updateScoutPins();
     this.animateMouse(now);
+    this.updatePlayerLight();
 
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
@@ -3177,6 +3198,38 @@ export class MouseRace3D {
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
     this.scene.background = new THREE.Color(level.theme.skyBottom);
     this.renderer.toneMappingExposure = level.theme.exposure ?? 1.05;
+
+    const lighting = level.theme.lighting;
+    const sky = lighting?.sky ?? 0xfff6d9;
+    const ground = lighting?.ground ?? 0x6e4421;
+    this.sceneLighting.hemi.color.setHex(sky);
+    this.sceneLighting.hemi.groundColor.setHex(ground);
+    this.sceneLighting.hemi.intensity = lighting?.hemisphere ?? 1.1;
+
+    this.sceneLighting.sun.color.setHex(lighting?.sun ?? 0xfff1c7);
+    this.sceneLighting.sun.intensity = lighting?.sunIntensity ?? 2.1;
+    this.sceneLighting.rim.color.setHex(lighting?.rim ?? 0xffd7a0);
+    this.sceneLighting.rim.intensity = lighting?.rimIntensity ?? 0.55;
+    this.sceneLighting.ambient.color.setHex(lighting?.ambient ?? 0xffe6bd);
+    this.sceneLighting.ambient.intensity = lighting?.ambientIntensity ?? 0.18;
+
+    this.sceneLighting.floorGlow.material.color.setHex(lighting?.floorGlow ?? 0xffefbe);
+    this.sceneLighting.floorGlow.material.opacity = lighting?.floorGlowOpacity ?? 0.35;
+    this.sceneLighting.island.material.color.setHex(lighting?.island ?? 0xf3d68f);
+    this.sceneLighting.playerLight.color.setHex(lighting?.playerLight ?? 0xfff0c0);
+    this.sceneLighting.playerLight.intensity = lighting?.playerLightIntensity ?? 0;
+  }
+
+  private updatePlayerLight(): void {
+    if (!this.player) {
+      return;
+    }
+
+    this.sceneLighting.playerLight.position.set(
+      this.player.position.x,
+      this.player.position.y + 2.15,
+      this.player.position.z,
+    );
   }
 
   private updateGuidanceHud(): void {
