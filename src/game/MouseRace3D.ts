@@ -856,18 +856,7 @@ export class MouseRace3D {
       gem.pairIndex = gems.length > 1 ? (indexGem + 1) % gems.length : undefined;
     });
 
-    const outerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(Math.max(width, depth) * 0.56, 0.5, 12, 48),
-      new THREE.MeshStandardMaterial({
-        color: level.theme.trim,
-        transparent: true,
-        opacity: 0.35,
-        roughness: 0.85,
-      }),
-    );
-    outerRing.rotation.x = Math.PI / 2;
-    outerRing.position.y = -0.1;
-    group.add(outerRing);
+
 
     return {
       map: level.map,
