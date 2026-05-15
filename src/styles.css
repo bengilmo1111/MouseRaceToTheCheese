@@ -580,6 +580,47 @@ kbd {
   transform: translateY(-1px) scale(1.02);
 }
 
+.start-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.fullscreen-hint-btn {
+  display: none;
+  padding: 14px 22px;
+  border: 2px solid rgba(112, 69, 21, 0.22);
+  border-radius: 16px;
+  background: rgba(255, 252, 242, 0.88);
+  color: #6b4b1e;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.fullscreen-hint-btn:hover,
+.fullscreen-hint-btn:active {
+  background: #ffe9a0;
+}
+
+@media (pointer: coarse) {
+  .fullscreen-hint-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #fullscreen-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+    border-radius: 13px;
+  }
+}
+
 #touch-controls {
   position: fixed;
   inset: 0;
@@ -904,5 +945,244 @@ kbd {
     bottom: 108px;
     width: auto;
     max-height: 28vh;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   LANDSCAPE MOBILE
+   Overrides portrait-stack rules when height is short.
+   Coarse pointer = touch device. Orientation double-checks.
+   ═══════════════════════════════════════════════════════ */
+@media (orientation: landscape) and (max-height: 500px) {
+
+  /* ── HUD: single compact row across the top ── */
+  #hud {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, auto);
+    grid-template-rows: auto;
+    align-items: start;
+    gap: 6px;
+    padding: 8px 8px 0;
+  }
+
+  .hud-left {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: row;
+    gap: 5px;
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .hud-center {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+    align-items: center;
+  }
+
+  .hud-right {
+    grid-column: 3;
+    grid-row: 1;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 4px;
+    justify-self: end;
+  }
+
+  #timer-track {
+    width: clamp(100px, 22vw, 220px);
+    min-width: 0;
+    height: 14px;
+    margin: 5px 20px 0 16px;
+  }
+
+  #timer-alice,
+  #timer-cheese {
+    width: 26px;
+    height: 26px;
+  }
+
+  #timer-cheese {
+    right: -12px;
+  }
+
+  .hud-pill {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 10px;
+  }
+
+  .hud-pill-sm {
+    font-size: 9px;
+    padding: 3px 7px;
+    border-radius: 8px;
+  }
+
+  .hud-button {
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+    border-radius: 9px;
+  }
+
+  #fullscreen-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  #scout-btn {
+    min-width: 36px;
+    padding: 0 5px;
+  }
+
+  /* ── Touch controls: push to sides, vertically centred ── */
+  .touch-pad {
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 10px;
+    gap: 8px;
+    border-radius: 22px;
+  }
+
+  .touch-pad-steer {
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+  }
+
+  .touch-pad-drive {
+    right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+  }
+
+  .touch-btn {
+    width: clamp(52px, 10vw, 66px);
+    height: clamp(44px, 10vh, 58px);
+    min-width: 48px;
+    min-height: 42px;
+    border-radius: 16px;
+  }
+
+  .touch-btn.arrow {
+    font-size: clamp(20px, 4.5vw, 28px);
+  }
+
+  .touch-btn-primary {
+    height: clamp(56px, 13vh, 72px);
+  }
+
+  .touch-row {
+    gap: 8px;
+  }
+
+  .touch-row.separated {
+    min-width: 0;
+    gap: 8px;
+    justify-content: center;
+  }
+
+  /* ── Start / overlay screen: compact, scrollable ── */
+  .screen-card {
+    width: min(98vw, 860px);
+    max-height: calc(100dvh - 12px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    padding: 14px 20px 12px;
+    overflow-y: auto;
+    border-radius: 20px;
+  }
+
+  .hero-card {
+    padding: 14px 20px 12px;
+  }
+
+  .hero-badge {
+    margin-bottom: 6px;
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+
+  .screen-card h1 {
+    font-size: clamp(20px, 4vw, 32px);
+    margin-bottom: 8px;
+  }
+
+  .screen-card h2 {
+    font-size: clamp(18px, 3.5vw, 28px);
+    margin-bottom: 6px;
+  }
+
+  .screen-card p {
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+
+  .overlay-icon {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 8px;
+  }
+
+  /* keep pickers side-by-side in landscape */
+  .maze-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    max-width: none;
+  }
+
+  .difficulty-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .maze-btn {
+    min-height: 52px;
+    flex-direction: row;
+    gap: 8px;
+    justify-content: flex-start;
+    padding: 8px 10px;
+  }
+
+  .maze-icon {
+    font-size: 18px;
+  }
+
+  .maze-btn strong {
+    font-size: 13px;
+  }
+
+  .difficulty-btn {
+    min-height: 54px;
+    padding: 8px;
+  }
+
+  .difficulty-btn strong {
+    font-size: 14px;
+  }
+
+  .picker-section {
+    margin-bottom: 10px;
+  }
+
+  .hero-controls {
+    margin-bottom: 10px;
+  }
+
+  .primary-btn {
+    padding: 11px 24px;
+    font-size: 17px;
+    border-radius: 14px;
+  }
+
+  .fullscreen-hint-btn {
+    padding: 10px 18px;
+    font-size: 15px;
+    border-radius: 12px;
+  }
+
+  .start-row {
+    gap: 8px;
+  }
+
+  #playtest-panel {
+    bottom: 8px;
+    max-height: 55vh;
   }
 }
