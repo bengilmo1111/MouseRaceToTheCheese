@@ -72,12 +72,30 @@ type ScoutPin = {
   isVisible: () => boolean;
 };
 
+type LevelAssetPool = {
+  crumbGeometry: THREE.BufferGeometry;
+  guideCrumbGeometry: THREE.BufferGeometry;
+  crumbMaterial: THREE.Material;
+  guideCrumbMaterial: THREE.Material;
+  guideCrumbGlowGeometry: THREE.BufferGeometry;
+  guideCrumbGlowMaterial: THREE.Material;
+  trapGlowGeometry: THREE.BufferGeometry;
+  trapGlowMaterial: THREE.Material;
+  lavaGlowGeometry: THREE.BufferGeometry;
+  lavaGlowMaterial: THREE.Material;
+  waterRippleGeometry: THREE.BufferGeometry[];
+  waterRippleMaterials: THREE.Material[];
+};
+
 const PLAYER_RADIUS = 0.42;
 const CAT_RADIUS = 0.5;
 const SCOUT_PEEK_DURATION_MS = 12000;
 const SCOUT_CRUMBS_PER_CHARGE = 5;
 const MAX_SCOUT_PEEKS = 3;
 const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
+const MIN_PIXEL_RATIO = 1;
+const PIXEL_RATIO_STEP = 0.15;
+const PERF_SAMPLE_MS = 1800;
 const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
   easy: {
     label: "Kid",
@@ -117,7 +135,11 @@ export class MouseRace3D {
   private readonly host: HTMLElement;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
-  private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  private readonly renderer = new THREE.WebGLRenderer({
+    antialias: window.devicePixelRatio <= 1.5,
+    alpha: true,
+    powerPreference: "high-performance",
+  });
   private readonly clock = new THREE.Clock();
   private readonly tileSize = 2.6;
   private readonly moveSpeed = 6.0;
@@ -131,6 +153,11 @@ export class MouseRace3D {
   private readonly _tmpVec = new THREE.Vector3();
   private readonly _projected = new THREE.Vector3();
   private readonly textureCache = new Map<string, THREE.CanvasTexture>();
+  private readonly maxPixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
+  private currentPixelRatio = this.maxPixelRatio;
+  private perfSampleStartedAt = performance.now();
+  private perfFrameCount = 0;
+  private scoutPinsWereVisible = false;
   private currentSpeed = 0;
   private targetSpeed = 0;
   private bankAngle = 0;
@@ -226,7 +253,7 @@ export class MouseRace3D {
     this.bgMusic.volume = 0.5;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.currentPixelRatio);
     this.host.appendChild(this.renderer.domElement);
 
     this.audio.setMuted(localStorage.getItem(MUTE_KEY) === "1");
@@ -260,7 +287,7 @@ export class MouseRace3D {
     const sun = new THREE.DirectionalLight(0xfff1c7, 2.1);
     sun.position.set(12, 22, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1536, 1536);
     sun.shadow.camera.left = -28;
     sun.shadow.camera.right = 28;
     sun.shadow.camera.top = 28;
@@ -552,9 +579,7 @@ export class MouseRace3D {
     this.clearGuideTrail();
 
     if (this.maze) {
-      this.maze.sharedGeometries.forEach((g) => g.dispose());
-      this.maze.sharedMaterials.forEach((m) => m.dispose());
-      this.scene.remove(this.maze.levelGroup);
+      this.disposeLevel(this.maze.levelGroup);
     }
 
     this.maze = this.buildLevel(LEVELS[index]);
@@ -601,6 +626,7 @@ export class MouseRace3D {
     let cheesePoint = new THREE.Vector3();
     let catPoint = new THREE.Vector3();
     let crumbIndex = 0;
+    const assets = this.createLevelAssetPool();
 
     const floorMat = this.createFloorMaterial(level, width, depth);
     const floorGeo = new THREE.BoxGeometry(width + 2.4, 0.5, depth + 2.4);
@@ -621,8 +647,27 @@ export class MouseRace3D {
     const hPanelGeo = new THREE.BoxGeometry(panelLength, wallHeight, panelThickness);
     const vPanelGeo = new THREE.BoxGeometry(panelThickness, wallHeight, panelLength);
     const solidGeo = new THREE.BoxGeometry(this.tileSize * wallScale, wallHeight, this.tileSize * wallScale);
-    const sharedGeometries = [hPanelGeo, vPanelGeo, solidGeo, floorGeo];
-    const sharedMaterials: THREE.Material[] = [floorMat];
+    const sharedGeometries = [
+      hPanelGeo,
+      vPanelGeo,
+      solidGeo,
+      floorGeo,
+      assets.crumbGeometry,
+      assets.guideCrumbGeometry,
+      assets.guideCrumbGlowGeometry,
+      assets.trapGlowGeometry,
+      assets.lavaGlowGeometry,
+      ...assets.waterRippleGeometry,
+    ];
+    const sharedMaterials: THREE.Material[] = [
+      floorMat,
+      assets.crumbMaterial,
+      assets.guideCrumbMaterial,
+      assets.guideCrumbGlowMaterial,
+      assets.trapGlowMaterial,
+      assets.lavaGlowMaterial,
+      ...assets.waterRippleMaterials,
+    ];
     const seenMats = new Set<THREE.Material>();
     for (const m of wallMaterials) {
       if (!seenMats.has(m)) { seenMats.add(m); sharedMaterials.push(m); }
@@ -634,6 +679,9 @@ export class MouseRace3D {
       : level.theme.wallStyle === "bamboo"
       ? new THREE.MeshStandardMaterial({ color: 0x1a0e06, roughness: 0.88, transparent: true, opacity: 0.72 })
       : undefined;
+    if (tapeMaterial) {
+      sharedMaterials.push(tapeMaterial);
+    }
 
     level.map.forEach((line, row) => {
       [...line].forEach((cell, col) => {
@@ -702,38 +750,16 @@ export class MouseRace3D {
         if (cell === ".") {
           crumbIndex += 1;
           const isGuideCrumb = crumbIndex % DIFFICULTY_SETTINGS[this.difficulty].greenCrumbInterval === 0;
-          const crumbGeom = new THREE.IcosahedronGeometry(0.18, 0);
-          const posAttr = crumbGeom.getAttribute("position") as THREE.BufferAttribute;
-          for (let v = 0; v < posAttr.count; v += 1) {
-            const jitter = 0.55 + Math.random() * 0.6;
-            posAttr.setXYZ(v, posAttr.getX(v) * jitter, posAttr.getY(v) * (0.5 + Math.random() * 0.6), posAttr.getZ(v) * jitter);
-          }
-          crumbGeom.computeVertexNormals();
           const crumbMesh = new THREE.Mesh(
-            crumbGeom,
-            new THREE.MeshStandardMaterial({
-              color: isGuideCrumb ? 0x77f27a : 0xf2d27a,
-              emissive: isGuideCrumb ? 0x24bf4f : 0xb98328,
-              emissiveIntensity: isGuideCrumb ? 0.65 : 0.18,
-              roughness: 0.85,
-              flatShading: true,
-            }),
+            isGuideCrumb ? assets.guideCrumbGeometry : assets.crumbGeometry,
+            isGuideCrumb ? assets.guideCrumbMaterial : assets.crumbMaterial,
           );
           crumbMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
           crumbMesh.scale.setScalar(isGuideCrumb ? 1.18 : 1);
           crumbMesh.castShadow = true;
           crumbMesh.position.set(x, 0.18, z);
           if (isGuideCrumb) {
-            const glow = new THREE.Mesh(
-              new THREE.RingGeometry(0.32, 0.46, 24),
-              new THREE.MeshBasicMaterial({
-                color: 0x5cff80,
-                transparent: true,
-                opacity: 0.5,
-                side: THREE.DoubleSide,
-                depthWrite: false,
-              }),
-            );
+            const glow = new THREE.Mesh(assets.guideCrumbGlowGeometry, assets.guideCrumbGlowMaterial);
             glow.rotation.x = -Math.PI / 2;
             glow.position.y = -0.14;
             crumbMesh.add(glow);
@@ -750,16 +776,7 @@ export class MouseRace3D {
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone(), kind: "trap" });
 
-          const glow = new THREE.Mesh(
-            new THREE.RingGeometry(0.55, 0.95, 32),
-            new THREE.MeshBasicMaterial({
-              color: 0xff5a3a,
-              transparent: true,
-              opacity: 0.35,
-              side: THREE.DoubleSide,
-              depthWrite: false,
-            }),
-          );
+          const glow = new THREE.Mesh(assets.trapGlowGeometry, assets.trapGlowMaterial);
           glow.rotation.x = -Math.PI / 2;
           glow.position.set(x, 0.012, z);
           glow.userData = { kind: "trap" };
@@ -773,10 +790,7 @@ export class MouseRace3D {
           lavaTile.position.set(x, 0.01, z);
           group.add(lavaTile);
           traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
-          const glow = new THREE.Mesh(
-            new THREE.RingGeometry(0.32, 0.52, 32),
-            new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
-          );
+          const glow = new THREE.Mesh(assets.lavaGlowGeometry, assets.lavaGlowMaterial);
           glow.rotation.x = -Math.PI / 2;
           glow.position.set(x, 0.022, z);
           glow.userData = { kind: "lava" };
@@ -791,11 +805,7 @@ export class MouseRace3D {
           group.add(waterTile);
           traps.push({ mesh: waterTile, position: waterTile.position.clone(), kind: "water" });
           for (let ri = 0; ri < 3; ri += 1) {
-            const inner = 0.18 + ri * 0.14;
-            const ripple = new THREE.Mesh(
-              new THREE.RingGeometry(inner, inner + 0.1, 32),
-              new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
-            );
+            const ripple = new THREE.Mesh(assets.waterRippleGeometry[ri], assets.waterRippleMaterials[ri]);
             ripple.rotation.x = -Math.PI / 2;
             ripple.position.set(x, 0.022, z);
             ripple.userData = { kind: "water", phase: (ri / 3) * Math.PI * 2 };
@@ -879,6 +889,85 @@ export class MouseRace3D {
       sharedGeometries,
       sharedMaterials,
     };
+  }
+
+
+  private createLevelAssetPool(): LevelAssetPool {
+    const crumbGeometry = this.createCrumbGeometry(0.18, 1);
+    const guideCrumbGeometry = this.createCrumbGeometry(0.2, 1.12);
+    const crumbMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf2d27a,
+      emissive: 0xb98328,
+      emissiveIntensity: 0.18,
+      roughness: 0.85,
+      flatShading: true,
+    });
+    const guideCrumbMaterial = new THREE.MeshStandardMaterial({
+      color: 0x77f27a,
+      emissive: 0x24bf4f,
+      emissiveIntensity: 0.65,
+      roughness: 0.85,
+      flatShading: true,
+    });
+    const guideCrumbGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x5cff80,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const trapGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff5a3a,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const lavaGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const waterRippleMaterials = [0.32, 0.24, 0.16].map((opacity) => new THREE.MeshBasicMaterial({
+      color: 0x40c8ff,
+      transparent: true,
+      opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }));
+
+    return {
+      crumbGeometry,
+      guideCrumbGeometry,
+      crumbMaterial,
+      guideCrumbMaterial,
+      guideCrumbGlowGeometry: new THREE.RingGeometry(0.32, 0.46, 24),
+      guideCrumbGlowMaterial,
+      trapGlowGeometry: new THREE.RingGeometry(0.55, 0.95, 32),
+      trapGlowMaterial,
+      lavaGlowGeometry: new THREE.RingGeometry(0.32, 0.52, 32),
+      lavaGlowMaterial,
+      waterRippleGeometry: [0.18, 0.32, 0.46].map((inner) => new THREE.RingGeometry(inner, inner + 0.1, 32)),
+      waterRippleMaterials,
+    };
+  }
+
+  private createCrumbGeometry(radius: number, scaleVariation: number): THREE.BufferGeometry {
+    const geometry = new THREE.IcosahedronGeometry(radius, 0);
+    const posAttr = geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let v = 0; v < posAttr.count; v += 1) {
+      const jitter = (v % 3 === 0 ? 0.78 : v % 3 === 1 ? 1.06 : 0.92) * scaleVariation;
+      posAttr.setXYZ(
+        v,
+        posAttr.getX(v) * jitter,
+        posAttr.getY(v) * (0.68 + (v % 4) * 0.1),
+        posAttr.getZ(v) * (1.02 - (v % 5) * 0.035),
+      );
+    }
+    geometry.computeVertexNormals();
+    return geometry;
   }
 
   private buildMouse(): THREE.Group {
@@ -1450,11 +1539,15 @@ export class MouseRace3D {
     this.touchControls.classList.toggle("scout-hidden", scoutActive);
 
     if (!scoutActive) {
-      for (const pin of this.scoutPins) {
-        pin.element.hidden = true;
+      if (this.scoutPinsWereVisible) {
+        for (const pin of this.scoutPins) {
+          pin.element.hidden = true;
+        }
+        this.scoutPinsWereVisible = false;
       }
       return;
     }
+    this.scoutPinsWereVisible = true;
 
     const overlayWidth = this.hud.scoutOverlay.clientWidth || window.innerWidth;
     const overlayHeight = this.hud.scoutOverlay.clientHeight || window.innerHeight;
@@ -1857,13 +1950,14 @@ export class MouseRace3D {
     this.animateMouse(now);
 
     this.playtestTick += 1;
-    if (this.playtestTick % 5 === 0) {
+    if (this.playtestTick % 10 === 0) {
       this.updatePlaytestState();
       this.updateGuidanceHud();
       this.refreshScoutButton();
     }
 
     this.renderer.render(this.scene, this.camera);
+    this.updateAdaptiveQuality(now);
   };
 
   private stepMove(direction: ControlKey): void {
@@ -2071,6 +2165,13 @@ export class MouseRace3D {
     }
   }
 
+
+  private isNearPlayer(position: THREE.Vector3, radius: number): boolean {
+    const dx = this.player.position.x - position.x;
+    const dz = this.player.position.z - position.z;
+    return dx * dx + dz * dz < radius * radius;
+  }
+
   private updatePickups(_delta: number, now: number): void {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
@@ -2078,7 +2179,7 @@ export class MouseRace3D {
       if (crumb.guideCrumb) {
         crumb.mesh.position.y = 0.22 + Math.sin(now * 0.005 + crumb.position.x) * 0.04;
       }
-      if (this.player.position.distanceToSquared(crumb.position) < 0.85 * 0.85) {
+      if (this.isNearPlayer(crumb.position, 0.85)) {
         crumb.active = false;
         crumb.mesh.visible = false;
         this.crumbs += 1;
@@ -2102,7 +2203,7 @@ export class MouseRace3D {
     }
 
     for (const trap of this.maze.traps) {
-      if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
+      if (this.isNearPlayer(trap.position, 0.75)) {
         this.audio.playTrap();
         const msg = trap.kind === "lava" ? "You fell into a lava pit!"
           : trap.kind === "water" ? "You sank into a water trap!"
@@ -2138,7 +2239,7 @@ export class MouseRace3D {
       if (!gem.active) continue;
       gem.mesh.rotation.y += 0.04;
       gem.mesh.position.y = 0.6 + Math.sin(now * 0.004 + gem.position.x) * 0.1;
-      if (this.player.position.distanceToSquared(gem.position) < 0.95 * 0.95) {
+      if (this.isNearPlayer(gem.position, 0.95)) {
         this.teleportFromGem(gem);
       }
     }
@@ -2147,7 +2248,7 @@ export class MouseRace3D {
       if (!key.active) continue;
       key.mesh.rotation.y += 0.035;
       key.mesh.position.y = 0.45 + Math.sin(now * 0.0045 + key.position.z) * 0.08;
-      if (this.player.position.distanceToSquared(key.position) < 0.9 * 0.9) {
+      if (this.isNearPlayer(key.position, 0.9)) {
         key.active = false;
         key.mesh.visible = false;
         this.collectedCheeseKeys += 1;
@@ -2159,7 +2260,7 @@ export class MouseRace3D {
     }
 
     this.cheese.rotation.y += 0.02;
-    if (this.player.position.distanceToSquared(this.cheese.position) < 1.0 * 1.0) {
+    if (this.isNearPlayer(this.cheese.position, 1.0)) {
       const remainingKeys = this.remainingRequiredCheeseKeys();
       if (remainingKeys === 0) {
         this.completeLevel();
@@ -2912,6 +3013,69 @@ export class MouseRace3D {
     }, 1600);
   }
 
+
+  private disposeLevel(levelGroup: THREE.Group): void {
+    this.scene.remove(levelGroup);
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+
+    levelGroup.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) {
+        geometries.add(object.geometry);
+        const material = object.material;
+        const objectMaterials = Array.isArray(material) ? material : [material];
+        objectMaterials.forEach((item) => materials.add(item));
+      }
+      if (object instanceof THREE.Sprite) {
+        const material = object.material;
+        materials.add(material);
+        material.map?.dispose();
+      }
+    });
+
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => {
+      this.disposeUncachedMaterialTextures(material);
+      material.dispose();
+    });
+  }
+
+  private disposeUncachedMaterialTextures(material: THREE.Material): void {
+    const cachedTextures = new Set<THREE.Texture>(this.textureCache.values());
+    const textureSlots = ["map", "bumpMap", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap", "alphaMap"] as const;
+    const materialWithTextures = material as THREE.Material & Partial<Record<(typeof textureSlots)[number], THREE.Texture>>;
+    for (const slot of textureSlots) {
+      const texture = materialWithTextures[slot];
+      if (texture && !cachedTextures.has(texture)) {
+        texture.dispose();
+      }
+    }
+  }
+
+  private updateAdaptiveQuality(now: number): void {
+    this.perfFrameCount += 1;
+    const elapsed = now - this.perfSampleStartedAt;
+    if (elapsed < PERF_SAMPLE_MS) {
+      return;
+    }
+
+    const averageFps = (this.perfFrameCount * 1000) / elapsed;
+    this.perfFrameCount = 0;
+    this.perfSampleStartedAt = now;
+
+    let nextPixelRatio = this.currentPixelRatio;
+    if (averageFps < 48 && this.currentPixelRatio > MIN_PIXEL_RATIO) {
+      nextPixelRatio = Math.max(MIN_PIXEL_RATIO, this.currentPixelRatio - PIXEL_RATIO_STEP);
+    } else if (averageFps > 57 && this.currentPixelRatio < this.maxPixelRatio) {
+      nextPixelRatio = Math.min(this.maxPixelRatio, this.currentPixelRatio + PIXEL_RATIO_STEP);
+    }
+
+    if (Math.abs(nextPixelRatio - this.currentPixelRatio) >= 0.01) {
+      this.currentPixelRatio = nextPixelRatio;
+      this.renderer.setPixelRatio(this.currentPixelRatio);
+    }
+  }
+
   private updateTheme(level: LevelDefinition): void {
     this.host.style.background = `linear-gradient(180deg, ${level.theme.skyTop} 0%, ${level.theme.skyBottom} 100%)`;
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
@@ -2996,7 +3160,10 @@ export class MouseRace3D {
   }
 
   private updatePlaytestState(): void {
-    this.playtest.state.textContent = JSON.stringify(this.getStateSnapshot(), null, 2);
+    const panel = this.playtest.state.closest("#playtest-panel");
+    if (panel && !panel.classList.contains("hidden")) {
+      this.playtest.state.textContent = JSON.stringify(this.getStateSnapshot(), null, 2);
+    }
     (window as Window & { render_game_to_text?: () => string }).render_game_to_text = () =>
       JSON.stringify(this.getStateSnapshot());
   }
