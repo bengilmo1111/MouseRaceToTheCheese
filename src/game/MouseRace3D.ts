@@ -1032,23 +1032,22 @@ export class MouseRace3D {
 
   private animateMouse(now: number): void {
     if (!this.mouseParts) return;
-    const t = now;
 
-    const idleWag = Math.sin(t * 0.006) * 0.18;
+    const idleWag = Math.sin(now * 0.006) * 0.18;
     const turnWag = THREE.MathUtils.clamp(-this.turnRate * 0.18, -0.6, 0.6);
     const speedFactor = 1 + Math.min(1.5, Math.abs(this.currentSpeed) * 0.18);
     this.mouseParts.tail.rotation.z = (idleWag + turnWag) * speedFactor;
-    this.mouseParts.tail.rotation.y = Math.sin(t * 0.0072 + 0.7) * 0.1 * speedFactor;
+    this.mouseParts.tail.rotation.y = Math.sin(now * 0.0072 + 0.7) * 0.1 * speedFactor;
 
     const earBase = 0.16;
-    const twitch = Math.sin(t * 0.011) * 0.06 + (Math.sin(t * 0.0017) > 0.97 ? 0.18 : 0);
+    const twitch = Math.sin(now * 0.011) * 0.06 + (Math.sin(now * 0.0017) > 0.97 ? 0.18 : 0);
     this.mouseParts.earL.rotation.z = -earBase + twitch;
     this.mouseParts.earR.rotation.z = earBase - twitch;
-    this.mouseParts.earL.rotation.x = Math.sin(t * 0.009) * 0.05;
-    this.mouseParts.earR.rotation.x = Math.sin(t * 0.009 + 0.4) * 0.05;
+    this.mouseParts.earL.rotation.x = Math.sin(now * 0.009) * 0.05;
+    this.mouseParts.earR.rotation.x = Math.sin(now * 0.009 + 0.4) * 0.05;
 
     const blinkPeriod = 3600;
-    const phase = (t % blinkPeriod) / blinkPeriod;
+    const phase = (now % blinkPeriod) / blinkPeriod;
     let blink = 0;
     if (phase > 0.94) {
       blink = Math.sin((phase - 0.94) / 0.06 * Math.PI);
