@@ -2916,6 +2916,7 @@ export class MouseRace3D {
     this.host.style.background = `linear-gradient(180deg, ${level.theme.skyTop} 0%, ${level.theme.skyBottom} 100%)`;
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
     this.scene.background = new THREE.Color(level.theme.skyBottom);
+    this.renderer.toneMappingExposure = level.theme.exposure ?? 1.05;
   }
 
   private updateGuidanceHud(): void {
