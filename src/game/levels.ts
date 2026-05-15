@@ -13,6 +13,22 @@ export type LevelTheme = {
   hud: string;
   fog: number;
   exposure?: number;
+  lighting?: {
+    sky: number;
+    ground: number;
+    hemisphere: number;
+    sun: number;
+    sunIntensity: number;
+    rim: number;
+    rimIntensity: number;
+    ambient: number;
+    ambientIntensity: number;
+    floorGlow: number;
+    floorGlowOpacity: number;
+    island: number;
+    playerLight?: number;
+    playerLightIntensity?: number;
+  };
 };
 
 export type LevelDefinition = {
@@ -97,17 +113,33 @@ export const LEVELS: LevelDefinition[] = [
       name: "Stone",
       wallStyle: "stone",
       hazardStyle: "lava",
-      skyTop: "#1e0e08",
-      skyBottom: "#30140a",
-      floor: 0x3e2c1e,
-      wallTop: 0x6a5442,
-      wallSide: 0x4e3828,
-      accent: 0xff7030,
-      hazard: 0xff3300,
-      trim: 0x7a5a38,
-      hud: "#ff8050",
-      fog: 0x3a1a0a,
-      exposure: 1.4,
+      skyTop: "#2a1208",
+      skyBottom: "#4a210f",
+      floor: 0x5a3d2a,
+      wallTop: 0x917258,
+      wallSide: 0x6f4d36,
+      accent: 0xff8a42,
+      hazard: 0xff3f12,
+      trim: 0x9b754a,
+      hud: "#ff9b65",
+      fog: 0x5a240d,
+      exposure: 1.8,
+      lighting: {
+        sky: 0xffd19a,
+        ground: 0x8b3b18,
+        hemisphere: 1.8,
+        sun: 0xffb470,
+        sunIntensity: 2.9,
+        rim: 0xff6a2a,
+        rimIntensity: 1.25,
+        ambient: 0xffb885,
+        ambientIntensity: 0.72,
+        floorGlow: 0xff7a2a,
+        floorGlowOpacity: 0.5,
+        island: 0x68401f,
+        playerLight: 0xffaa66,
+        playerLightIntensity: 5.6,
+      },
     },
     map: [
       "#########################################",
@@ -162,16 +194,33 @@ export const LEVELS: LevelDefinition[] = [
       name: "Jungle",
       wallStyle: "bamboo",
       hazardStyle: "water",
-      skyTop: "#060e06",
-      skyBottom: "#0c1e0a",
-      floor: 0x1a2e10,
-      wallTop: 0x3d6a25,
-      wallSide: 0x243d14,
-      accent: 0x6aff45,
-      hazard: 0x0077ff,
-      trim: 0x1a3a10,
-      hud: "#6aff45",
-      fog: 0x060e06,
+      skyTop: "#123618",
+      skyBottom: "#214f1f",
+      floor: 0x315b20,
+      wallTop: 0x6fa647,
+      wallSide: 0x4d7a2d,
+      accent: 0x8cff62,
+      hazard: 0x1aa7ff,
+      trim: 0x345f1f,
+      hud: "#9dff79",
+      fog: 0x1a3e14,
+      exposure: 1.68,
+      lighting: {
+        sky: 0xe8ffd4,
+        ground: 0x2f6b24,
+        hemisphere: 1.95,
+        sun: 0xf6ffb4,
+        sunIntensity: 2.75,
+        rim: 0x7dff69,
+        rimIntensity: 1.15,
+        ambient: 0xd8ffc4,
+        ambientIntensity: 0.78,
+        floorGlow: 0x9eff66,
+        floorGlowOpacity: 0.4,
+        island: 0x2f5a1d,
+        playerLight: 0xcfff95,
+        playerLightIntensity: 4.8,
+      },
     },
     map: [
       "#########################################",
@@ -226,17 +275,33 @@ export const LEVELS: LevelDefinition[] = [
       name: "Space",
       wallStyle: "metal",
       hazardStyle: "void",
-      skyTop: "#00010a",
-      skyBottom: "#000614",
-      floor: 0x0a0e1a,
-      wallTop: 0x1e2d42,
-      wallSide: 0x162438,
-      accent: 0x00d4ff,
-      hazard: 0x8800ff,
-      trim: 0x0044aa,
-      hud: "#00d4ff",
-      fog: 0x000814,
-      exposure: 1.3,
+      skyTop: "#030a22",
+      skyBottom: "#07173b",
+      floor: 0x18243a,
+      wallTop: 0x38577a,
+      wallSide: 0x27425f,
+      accent: 0x3ce8ff,
+      hazard: 0xae55ff,
+      trim: 0x1672d8,
+      hud: "#5deeff",
+      fog: 0x061333,
+      exposure: 1.78,
+      lighting: {
+        sky: 0xb7eaff,
+        ground: 0x1d3d88,
+        hemisphere: 1.9,
+        sun: 0x9ae6ff,
+        sunIntensity: 3.0,
+        rim: 0x8f5cff,
+        rimIntensity: 1.45,
+        ambient: 0x99d8ff,
+        ambientIntensity: 0.78,
+        floorGlow: 0x00d4ff,
+        floorGlowOpacity: 0.36,
+        island: 0x111f3c,
+        playerLight: 0x79f4ff,
+        playerLightIntensity: 6.4,
+      },
     },
     map: [
       "#########################################",
