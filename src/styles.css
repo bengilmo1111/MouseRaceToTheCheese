@@ -456,7 +456,7 @@ input {
 
 .maze-picker {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   max-width: 640px;
   margin: 0 auto;
@@ -1123,7 +1123,7 @@ kbd {
 
   /* keep pickers side-by-side in landscape */
   .maze-picker {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 7px;
     max-width: none;
   }
