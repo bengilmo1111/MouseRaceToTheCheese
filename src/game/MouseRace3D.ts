@@ -39,6 +39,7 @@ type MazePickup = {
 type MazeHazard = {
   mesh: THREE.Object3D;
   position: THREE.Vector3;
+  kind: "trap" | "lava" | "water";
 };
 
 type MazeState = {
@@ -599,11 +600,18 @@ export class MouseRace3D {
 
     const wallMaterials = this.createWallMaterials(level);
     const wallScale = 0.94;
-    const wallHeight = level.theme.wallStyle === "cardboard" ? 1.45 : 2.4;
-    const tapeMaterial =
-      level.theme.wallStyle === "cardboard"
-        ? new THREE.MeshStandardMaterial({ color: 0xe7c783, roughness: 0.9, transparent: true, opacity: 0.82 })
-        : undefined;
+    const isThinPanel = level.theme.wallStyle === "cardboard" || level.theme.wallStyle === "stone" || level.theme.wallStyle === "bamboo";
+    const wallHeight = level.theme.wallStyle === "stone" ? 1.75
+      : level.theme.wallStyle === "bamboo" ? 1.55
+      : level.theme.wallStyle === "cardboard" ? 1.45
+      : 2.4;
+    const tapeMaterial = level.theme.wallStyle === "cardboard"
+      ? new THREE.MeshStandardMaterial({ color: 0xe7c783, roughness: 0.9, transparent: true, opacity: 0.82 })
+      : level.theme.wallStyle === "stone"
+      ? new THREE.MeshStandardMaterial({ color: 0x1e3010, roughness: 0.95, transparent: true, opacity: 0.65 })
+      : level.theme.wallStyle === "bamboo"
+      ? new THREE.MeshStandardMaterial({ color: 0x1a0e06, roughness: 0.88, transparent: true, opacity: 0.72 })
+      : undefined;
 
     level.map.forEach((line, row) => {
       [...line].forEach((cell, col) => {
@@ -611,7 +619,7 @@ export class MouseRace3D {
         const z = originZ + row * this.tileSize;
 
         if (cell === "#") {
-          if (level.theme.wallStyle === "cardboard") {
+          if (isThinPanel) {
             const hasHorizontal = level.map[row]?.[col - 1] === "#" || level.map[row]?.[col + 1] === "#";
             const hasVertical = level.map[row - 1]?.[col] === "#" || level.map[row + 1]?.[col] === "#";
             const panelLength = this.tileSize * 1.02;
@@ -730,7 +738,7 @@ export class MouseRace3D {
           trap.rotation.y = Math.random() * Math.PI;
           trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
-          traps.push({ mesh: trap, position: trap.position.clone() });
+          traps.push({ mesh: trap, position: trap.position.clone(), kind: "trap" });
 
           const glow = new THREE.Mesh(
             new THREE.RingGeometry(0.55, 0.95, 32),
@@ -744,8 +752,48 @@ export class MouseRace3D {
           );
           glow.rotation.x = -Math.PI / 2;
           glow.position.set(x, 0.012, z);
+          glow.userData = { kind: "trap" };
           group.add(glow);
           trapGlows.push(glow);
+          return;
+        }
+
+        if (cell === "L") {
+          const lavaTile = this.buildLavaPit();
+          lavaTile.position.set(x, 0.01, z);
+          lavaTile.add(this.createWorldMarker("LAVA", 0xff8040, 0xcc2800, 0.85));
+          group.add(lavaTile);
+          traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
+          const glow = new THREE.Mesh(
+            new THREE.RingGeometry(0.32, 0.52, 32),
+            new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+          );
+          glow.rotation.x = -Math.PI / 2;
+          glow.position.set(x, 0.022, z);
+          glow.userData = { kind: "lava" };
+          group.add(glow);
+          trapGlows.push(glow);
+          return;
+        }
+
+        if (cell === "~") {
+          const waterTile = this.buildWaterTrap();
+          waterTile.position.set(x, 0.01, z);
+          waterTile.add(this.createWorldMarker("WATER", 0x50d0ff, 0x0044cc, 0.85));
+          group.add(waterTile);
+          traps.push({ mesh: waterTile, position: waterTile.position.clone(), kind: "water" });
+          for (let ri = 0; ri < 3; ri += 1) {
+            const inner = 0.18 + ri * 0.14;
+            const ripple = new THREE.Mesh(
+              new THREE.RingGeometry(inner, inner + 0.1, 32),
+              new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+            );
+            ripple.rotation.x = -Math.PI / 2;
+            ripple.position.set(x, 0.022, z);
+            ripple.userData = { kind: "water", phase: (ri / 3) * Math.PI * 2 };
+            group.add(ripple);
+            trapGlows.push(ripple);
+          }
           return;
         }
 
@@ -1466,45 +1514,68 @@ export class MouseRace3D {
   }
 
   private createFloorMaterial(level: LevelDefinition, width: number, depth: number): THREE.Material {
-    if (level.theme.wallStyle !== "cardboard") {
-      return new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 });
+    const rep = (w: number, d: number) => [Math.max(6, w / 8), Math.max(6, d / 8)] as const;
+    if (level.theme.wallStyle === "cardboard") {
+      const map = this.createCardboardTexture("floor");
+      const [rx, ry] = rep(width, depth);
+      map.repeat.set(rx, ry);
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.98 });
     }
-
-    const map = this.createCardboardTexture("floor");
-    map.repeat.set(Math.max(6, width / 8), Math.max(6, depth / 8));
-    return new THREE.MeshStandardMaterial({
-      color: level.theme.floor,
-      map,
-      roughness: 0.98,
-    });
+    if (level.theme.wallStyle === "stone") {
+      const map = this.createStoneTexture("floor");
+      const [rx, ry] = rep(width, depth);
+      map.repeat.set(rx, ry);
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.97, bumpMap: map, bumpScale: 0.03 });
+    }
+    if (level.theme.wallStyle === "bamboo") {
+      const map = this.createBambooTexture("floor");
+      const [rx, ry] = rep(width, depth);
+      map.repeat.set(rx, ry);
+      return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.96 });
+    }
+    return new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 });
   }
 
   private createWallMaterials(level: LevelDefinition): THREE.Material[] {
-    if (level.theme.wallStyle !== "cardboard") {
-      const wallTopMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallTop, roughness: 0.72 });
-      const wallSideMaterial = new THREE.MeshStandardMaterial({ color: level.theme.wallSide, roughness: 0.88 });
-      return [wallSideMaterial, wallSideMaterial, wallTopMaterial, wallSideMaterial, wallSideMaterial, wallSideMaterial];
+    if (level.theme.wallStyle === "cardboard") {
+      const sideMap = this.createCardboardTexture("side");
+      const topMap = this.createCardboardTexture("top");
+      const side = new THREE.MeshStandardMaterial({
+        color: level.theme.wallSide, map: sideMap, emissive: 0x5b3518, emissiveIntensity: 0.1,
+        roughness: 0.96, bumpMap: sideMap, bumpScale: 0.035,
+      });
+      const top = new THREE.MeshStandardMaterial({
+        color: level.theme.wallTop, map: topMap, roughness: 0.98, bumpMap: topMap, bumpScale: 0.025,
+      });
+      return [side, side, top, side, side, side];
     }
-
-    const sideMap = this.createCardboardTexture("side");
-    const topMap = this.createCardboardTexture("top");
-    const wallSideMaterial = new THREE.MeshStandardMaterial({
-      color: level.theme.wallSide,
-      map: sideMap,
-      emissive: 0x5b3518,
-      emissiveIntensity: 0.1,
-      roughness: 0.96,
-      bumpMap: sideMap,
-      bumpScale: 0.035,
-    });
-    const wallTopMaterial = new THREE.MeshStandardMaterial({
-      color: level.theme.wallTop,
-      map: topMap,
-      roughness: 0.98,
-      bumpMap: topMap,
-      bumpScale: 0.025,
-    });
-    return [wallSideMaterial, wallSideMaterial, wallTopMaterial, wallSideMaterial, wallSideMaterial, wallSideMaterial];
+    if (level.theme.wallStyle === "stone") {
+      const sideMap = this.createStoneTexture("side");
+      const topMap = this.createStoneTexture("top");
+      const side = new THREE.MeshStandardMaterial({
+        color: level.theme.wallSide, map: sideMap, roughness: 0.94,
+        bumpMap: sideMap, bumpScale: 0.06,
+      });
+      const top = new THREE.MeshStandardMaterial({
+        color: level.theme.wallTop, map: topMap, roughness: 0.98, bumpMap: topMap, bumpScale: 0.04,
+      });
+      return [side, side, top, side, side, side];
+    }
+    if (level.theme.wallStyle === "bamboo") {
+      const sideMap = this.createBambooTexture("side");
+      const topMap = this.createBambooTexture("top");
+      const side = new THREE.MeshStandardMaterial({
+        color: level.theme.wallSide, map: sideMap, roughness: 0.82,
+        bumpMap: sideMap, bumpScale: 0.04,
+      });
+      const top = new THREE.MeshStandardMaterial({
+        color: level.theme.wallTop, map: topMap, roughness: 0.88,
+      });
+      return [side, side, top, side, side, side];
+    }
+    const wallTop = new THREE.MeshStandardMaterial({ color: level.theme.wallTop, roughness: 0.72 });
+    const wallSide = new THREE.MeshStandardMaterial({ color: level.theme.wallSide, roughness: 0.88 });
+    return [wallSide, wallSide, wallTop, wallSide, wallSide, wallSide];
   }
 
   private createCardboardTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
@@ -1559,6 +1630,221 @@ export class MouseRace3D {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.needsUpdate = true;
     return texture;
+  }
+
+  private createStoneTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = kind === "floor" ? "#2e231a" : kind === "top" ? "#4a3a2a" : "#352820";
+    ctx.fillRect(0, 0, 256, 256);
+    if (kind === "side") {
+      const brickH = 32, brickW = 64;
+      for (let row = 0; row < 256 / brickH; row++) {
+        const offset = (row % 2) * (brickW / 2);
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = "#1a120c";
+        ctx.fillRect(0, row * brickH, 256, 2);
+        for (let col = -1; col < 256 / brickW + 1; col++) {
+          ctx.fillRect(col * brickW + offset, row * brickH, 2, brickH);
+        }
+        ctx.globalAlpha = 0.07;
+        ctx.fillStyle = "#6a5040";
+        ctx.fillRect(0, row * brickH + 4, 256, brickH - 8);
+      }
+    }
+    ctx.globalAlpha = 0.2;
+    for (let i = 0; i < 80; i++) {
+      const px = Math.random() * 256, py = Math.random() * 256;
+      const len = 4 + Math.random() * 18;
+      ctx.strokeStyle = Math.random() > 0.5 ? "#1a1008" : "#5a4030";
+      ctx.lineWidth = Math.random() > 0.7 ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + len * (Math.random() - 0.5), py + len * (Math.random() - 0.5));
+      ctx.stroke();
+    }
+    if (kind === "top") {
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = "#1a0e08";
+      for (let i = 0; i < 8; i++) {
+        const cx = 20 + Math.random() * 216, cy = 20 + Math.random() * 216, r = 10 + Math.random() * 22;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private createBambooTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = kind === "floor" ? "#1e3010" : kind === "top" ? "#3a5a20" : "#2e4a18";
+    ctx.fillRect(0, 0, 256, 256);
+    if (kind === "side") {
+      const nodeSpacing = 38;
+      ctx.globalAlpha = 0.18;
+      for (let y = nodeSpacing * 0.6; y < 256; y += nodeSpacing) {
+        ctx.fillStyle = "#0e1e08";
+        ctx.fillRect(0, y - 3, 256, 6);
+        ctx.fillStyle = "#5a8a30";
+        ctx.fillRect(0, y + 3, 256, 2);
+      }
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = "#7ab040";
+      for (let x = 0; x < 256; x += 8) {
+        ctx.fillRect(x, 0, 1, 256);
+      }
+    }
+    if (kind === "top") {
+      ctx.globalAlpha = 0.3;
+      const cx = 128, cy = 128;
+      for (let r = 100; r > 0; r -= 18) {
+        ctx.strokeStyle = r % 36 === 0 ? "#0e1e08" : "#5a8030";
+        ctx.lineWidth = r % 36 === 0 ? 3 : 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    if (kind === "floor") {
+      ctx.globalAlpha = 0.22;
+      for (let i = 0; i < 60; i++) {
+        const lx = Math.random() * 256, ly = Math.random() * 256;
+        const lw = 6 + Math.random() * 20, lh = 3 + Math.random() * 8;
+        ctx.fillStyle = Math.random() > 0.5 ? "#3a6020" : "#0e1a08";
+        ctx.save();
+        ctx.translate(lx, ly);
+        ctx.rotate(Math.random() * Math.PI);
+        ctx.fillRect(-lw / 2, -lh / 2, lw, lh);
+        ctx.restore();
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private buildLavaPit(): THREE.Group {
+    const group = new THREE.Group();
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#0a0400";
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.globalAlpha = 0.9;
+    for (let i = 0; i < 24; i++) {
+      const x1 = Math.random() * 128, y1 = Math.random() * 128;
+      const x2 = x1 + (Math.random() - 0.5) * 60, y2 = y1 + (Math.random() - 0.5) * 60;
+      const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+      grad.addColorStop(0, "#ff6600");
+      grad.addColorStop(0.5, "#ffaa00");
+      grad.addColorStop(1, "#cc2200");
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1 + Math.random() * 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.6;
+    for (let i = 0; i < 8; i++) {
+      const bx = Math.random() * 110 + 9, by = Math.random() * 110 + 9;
+      ctx.fillStyle = "#ff8800";
+      ctx.beginPath();
+      ctx.arc(bx, by, 2 + Math.random() * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const lavaMap = new THREE.CanvasTexture(canvas);
+    lavaMap.colorSpace = THREE.SRGBColorSpace;
+    const tile = new THREE.Mesh(
+      new THREE.BoxGeometry(0.78, 0.04, 0.78),
+      new THREE.MeshStandardMaterial({
+        color: 0xff4400,
+        map: lavaMap,
+        emissive: 0xff3300,
+        emissiveIntensity: 0.75,
+        roughness: 0.55,
+        metalness: 0.1,
+      }),
+    );
+    tile.castShadow = false;
+    tile.receiveShadow = true;
+    group.add(tile);
+    const innerGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.65, 0.65),
+      new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.28, depthWrite: false }),
+    );
+    innerGlow.rotation.x = -Math.PI / 2;
+    innerGlow.position.y = 0.025;
+    group.add(innerGlow);
+    return group;
+  }
+
+  private buildWaterTrap(): THREE.Group {
+    const group = new THREE.Group();
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#041428";
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.globalAlpha = 0.45;
+    const cx = 64, cy = 64;
+    for (let r = 56; r > 0; r -= 12) {
+      ctx.strokeStyle = r % 24 === 0 ? "#2090cc" : "#104070";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.25;
+    for (let i = 0; i < 12; i++) {
+      const px = Math.random() * 128, py = Math.random() * 128, pr = 2 + Math.random() * 6;
+      ctx.fillStyle = "#40b8ff";
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const waterMap = new THREE.CanvasTexture(canvas);
+    waterMap.colorSpace = THREE.SRGBColorSpace;
+    const tile = new THREE.Mesh(
+      new THREE.BoxGeometry(0.78, 0.04, 0.78),
+      new THREE.MeshStandardMaterial({
+        color: 0x0055bb,
+        map: waterMap,
+        emissive: 0x0044aa,
+        emissiveIntensity: 0.22,
+        roughness: 0.25,
+        metalness: 0.15,
+        transparent: true,
+        opacity: 0.88,
+      }),
+    );
+    tile.castShadow = false;
+    tile.receiveShadow = true;
+    group.add(tile);
+    const sheen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.62, 0.62),
+      new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.18, depthWrite: false }),
+    );
+    sheen.rotation.x = -Math.PI / 2;
+    sheen.position.y = 0.025;
+    group.add(sheen);
+    return group;
   }
 
   private addCardboardTape(
@@ -1848,17 +2134,34 @@ export class MouseRace3D {
     for (const trap of this.maze.traps) {
       if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
         this.audio.playTrap();
-        this.triggerHazard("A mousetrap snapped shut!");
+        const msg = trap.kind === "lava" ? "You fell into a lava pit!"
+          : trap.kind === "water" ? "You sank into a water trap!"
+          : "A mousetrap snapped shut!";
+        this.triggerHazard(msg);
       }
     }
 
     if (this.maze.trapGlows.length) {
-      const t = performance.now() * 0.004;
-      const pulse = 0.5 + Math.sin(t) * 0.5;
-      const scale = 0.9 + pulse * 0.18;
+      const now = performance.now();
       for (const glow of this.maze.trapGlows) {
-        glow.scale.set(scale, scale, scale);
-        (glow.material as THREE.MeshBasicMaterial).opacity = 0.22 + pulse * 0.28;
+        const kind = (glow.userData as { kind?: string; phase?: number }).kind || "trap";
+        if (kind === "lava") {
+          const pulse = 0.5 + Math.sin(now * 0.009) * 0.5;
+          const scale = 0.82 + pulse * 0.32;
+          glow.scale.set(scale, scale, scale);
+          (glow.material as THREE.MeshBasicMaterial).opacity = 0.32 + pulse * 0.52;
+        } else if (kind === "water") {
+          const phase = (glow.userData as { phase?: number }).phase ?? 0;
+          const pulse = 0.5 + Math.sin(now * 0.0018 + phase) * 0.5;
+          const scale = 0.55 + pulse * 0.85;
+          glow.scale.set(scale, scale, scale);
+          (glow.material as THREE.MeshBasicMaterial).opacity = 0.06 + pulse * 0.34;
+        } else {
+          const pulse = 0.5 + Math.sin(now * 0.004) * 0.5;
+          const scale = 0.9 + pulse * 0.18;
+          glow.scale.set(scale, scale, scale);
+          (glow.material as THREE.MeshBasicMaterial).opacity = 0.22 + pulse * 0.28;
+        }
       }
     }
 
