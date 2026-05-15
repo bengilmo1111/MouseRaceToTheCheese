@@ -12,6 +12,7 @@ export type LevelTheme = {
   trim: number;
   hud: string;
   fog: number;
+  exposure?: number;
 };
 
 export type LevelDefinition = {
@@ -96,16 +97,17 @@ export const LEVELS: LevelDefinition[] = [
       name: "Stone",
       wallStyle: "stone",
       hazardStyle: "lava",
-      skyTop: "#0a0504",
-      skyBottom: "#180b08",
-      floor: 0x2a1e18,
-      wallTop: 0x5a4535,
-      wallSide: 0x3a2a1e,
+      skyTop: "#1e0e08",
+      skyBottom: "#30140a",
+      floor: 0x3e2c1e,
+      wallTop: 0x6a5442,
+      wallSide: 0x4e3828,
       accent: 0xff7030,
       hazard: 0xff3300,
-      trim: 0x6a4a30,
+      trim: 0x7a5a38,
       hud: "#ff8050",
-      fog: 0x180a06,
+      fog: 0x3a1a0a,
+      exposure: 1.4,
     },
     map: [
       "#########################################",
