@@ -611,10 +611,11 @@ export class MouseRace3D {
 
     const wallMaterials = this.createWallMaterials(level);
     const wallScale = 0.94;
-    const isThinPanel = level.theme.wallStyle === "cardboard" || level.theme.wallStyle === "stone" || level.theme.wallStyle === "bamboo";
+    const isThinPanel = level.theme.wallStyle === "cardboard" || level.theme.wallStyle === "stone" || level.theme.wallStyle === "bamboo" || level.theme.wallStyle === "metal";
     const wallHeight = level.theme.wallStyle === "stone" ? 1.75
       : level.theme.wallStyle === "bamboo" ? 1.55
       : level.theme.wallStyle === "cardboard" ? 1.45
+      : level.theme.wallStyle === "metal" ? 1.65
       : 2.4;
     const panelLength = this.tileSize * 1.02;
     const panelThickness = this.tileSize * 0.16;
@@ -633,6 +634,8 @@ export class MouseRace3D {
       ? new THREE.MeshStandardMaterial({ color: 0x1e3010, roughness: 0.95, transparent: true, opacity: 0.65 })
       : level.theme.wallStyle === "bamboo"
       ? new THREE.MeshStandardMaterial({ color: 0x1a0e06, roughness: 0.88, transparent: true, opacity: 0.72 })
+      : level.theme.wallStyle === "metal"
+      ? new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.2, transparent: true, opacity: 0.55, emissive: 0x004488, emissiveIntensity: 0.8 })
       : undefined;
 
     level.map.forEach((line, row) => {
@@ -769,19 +772,35 @@ export class MouseRace3D {
         }
 
         if (cell === "L") {
-          const lavaTile = this.buildLavaPit();
-          lavaTile.position.set(x, 0.01, z);
-          group.add(lavaTile);
-          traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
-          const glow = new THREE.Mesh(
-            new THREE.RingGeometry(0.32, 0.52, 32),
-            new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
-          );
-          glow.rotation.x = -Math.PI / 2;
-          glow.position.set(x, 0.022, z);
-          glow.userData = { kind: "lava" };
-          group.add(glow);
-          trapGlows.push(glow);
+          if (level.theme.hazardStyle === "void") {
+            const voidTile = this.buildVoidRift();
+            voidTile.position.set(x, 0.01, z);
+            group.add(voidTile);
+            traps.push({ mesh: voidTile, position: voidTile.position.clone(), kind: "lava" });
+            const glow = new THREE.Mesh(
+              new THREE.RingGeometry(0.28, 0.58, 32),
+              new THREE.MeshBasicMaterial({ color: 0x8800ff, transparent: true, opacity: 0.65, side: THREE.DoubleSide, depthWrite: false }),
+            );
+            glow.rotation.x = -Math.PI / 2;
+            glow.position.set(x, 0.022, z);
+            glow.userData = { kind: "lava" };
+            group.add(glow);
+            trapGlows.push(glow);
+          } else {
+            const lavaTile = this.buildLavaPit();
+            lavaTile.position.set(x, 0.01, z);
+            group.add(lavaTile);
+            traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
+            const glow = new THREE.Mesh(
+              new THREE.RingGeometry(0.32, 0.52, 32),
+              new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+            );
+            glow.rotation.x = -Math.PI / 2;
+            glow.position.set(x, 0.022, z);
+            glow.userData = { kind: "lava" };
+            group.add(glow);
+            trapGlows.push(glow);
+          }
           return;
         }
 
@@ -1493,6 +1512,19 @@ export class MouseRace3D {
       map.repeat.set(rx, ry);
       return new THREE.MeshStandardMaterial({ color: level.theme.floor, map, roughness: 0.96 });
     }
+    if (level.theme.wallStyle === "metal") {
+      const map = this.createMetalTexture("floor");
+      const [rx, ry] = rep(width, depth);
+      map.repeat.set(rx, ry);
+      return new THREE.MeshStandardMaterial({
+        color: level.theme.floor,
+        map,
+        roughness: 0.3,
+        metalness: 0.7,
+        emissive: 0x001133,
+        emissiveIntensity: 0.15,
+      });
+    }
     return new THREE.MeshStandardMaterial({ color: level.theme.floor, roughness: 0.96 });
   }
 
@@ -1530,6 +1562,29 @@ export class MouseRace3D {
       });
       const top = new THREE.MeshStandardMaterial({
         color: level.theme.wallTop, map: topMap, roughness: 0.88,
+      });
+      return [side, side, top, side, side, side];
+    }
+    if (level.theme.wallStyle === "metal") {
+      const sideMap = this.createMetalTexture("side");
+      const topMap = this.createMetalTexture("top");
+      const side = new THREE.MeshStandardMaterial({
+        color: level.theme.wallSide,
+        map: sideMap,
+        roughness: 0.22,
+        metalness: 0.85,
+        emissive: 0x001844,
+        emissiveIntensity: 0.12,
+        bumpMap: sideMap,
+        bumpScale: 0.02,
+      });
+      const top = new THREE.MeshStandardMaterial({
+        color: level.theme.wallTop,
+        map: topMap,
+        roughness: 0.18,
+        metalness: 0.9,
+        emissive: 0x002266,
+        emissiveIntensity: 0.1,
       });
       return [side, side, top, side, side, side];
     }
@@ -1706,6 +1761,133 @@ export class MouseRace3D {
     return texture;
   }
 
+  private createMetalTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
+    const cacheKey = `metal-${kind}`;
+    const cached = this.textureCache.get(cacheKey);
+    if (cached) return cached;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+
+    if (kind === "side") {
+      // Metallic panel with horizontal seams and a cyan edge-light strip
+      ctx.fillStyle = "#121e2e";
+      ctx.fillRect(0, 0, 256, 256);
+
+      // Panel seams
+      ctx.globalAlpha = 0.55;
+      for (let y = 64; y < 256; y += 64) {
+        ctx.fillStyle = "#050c18";
+        ctx.fillRect(0, y - 2, 256, 4);
+        ctx.fillStyle = "#1e3050";
+        ctx.fillRect(0, y + 2, 256, 2);
+      }
+
+      // Vertical rivet lines
+      ctx.globalAlpha = 0.18;
+      for (let x = 32; x < 256; x += 32) {
+        ctx.fillStyle = "#0a1828";
+        ctx.fillRect(x, 0, 1, 256);
+      }
+
+      // Rivets at seam intersections
+      ctx.globalAlpha = 0.7;
+      for (let y = 64; y < 256; y += 64) {
+        for (let x = 32; x < 256; x += 32) {
+          ctx.fillStyle = "#2a4060";
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#4a7090";
+          ctx.beginPath();
+          ctx.arc(x - 1, y - 1, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Cyan edge glow strip at bottom
+      ctx.globalAlpha = 1;
+      const grad = ctx.createLinearGradient(0, 220, 0, 256);
+      grad.addColorStop(0, "rgba(0, 180, 255, 0)");
+      grad.addColorStop(0.6, "rgba(0, 180, 255, 0.28)");
+      grad.addColorStop(1, "rgba(0, 220, 255, 0.55)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 220, 256, 36);
+
+    } else if (kind === "top") {
+      // Brushed metal top — concentric panel rings
+      ctx.fillStyle = "#1a2a40";
+      ctx.fillRect(0, 0, 256, 256);
+      ctx.globalAlpha = 0.3;
+      for (let r = 120; r > 0; r -= 16) {
+        ctx.strokeStyle = r % 32 === 0 ? "#0a1e38" : "#243c58";
+        ctx.lineWidth = r % 32 === 0 ? 3 : 1;
+        ctx.beginPath();
+        ctx.arc(128, 128, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // Corner bolt holes
+      ctx.globalAlpha = 0.8;
+      for (const [cx, cy] of [[24, 24], [232, 24], [24, 232], [232, 232]] as [number, number][]) {
+        ctx.fillStyle = "#050c18";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#304860";
+        ctx.beginPath();
+        ctx.arc(cx - 1, cy - 1, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+    } else {
+      // Floor — grid of glowing cyan lines on dark metal
+      ctx.fillStyle = "#080e18";
+      ctx.fillRect(0, 0, 256, 256);
+
+      // Grid lines
+      ctx.globalAlpha = 0.14;
+      ctx.strokeStyle = "#00aaff";
+      ctx.lineWidth = 1;
+      for (let i = 32; i < 256; i += 32) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 256); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(256, i); ctx.stroke();
+      }
+
+      // Brighter intersection dots
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = "#00ccff";
+      for (let x = 32; x < 256; x += 32) {
+        for (let y = 32; y < 256; y += 32) {
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Subtle scratches
+      ctx.globalAlpha = 0.06;
+      ctx.strokeStyle = "#4488aa";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 30; i++) {
+        const sx = Math.random() * 256, sy = Math.random() * 256;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + (Math.random() - 0.5) * 40, sy + (Math.random() - 0.5) * 40);
+        ctx.stroke();
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this.textureCache.set(cacheKey, texture);
+    return texture;
+  }
+
   private buildLavaPit(): THREE.Group {
     const group = new THREE.Group();
     const canvas = document.createElement("canvas");
@@ -1813,6 +1995,84 @@ export class MouseRace3D {
     sheen.rotation.x = -Math.PI / 2;
     sheen.position.y = 0.025;
     group.add(sheen);
+    return group;
+  }
+
+  private buildVoidRift(): THREE.Group {
+    const group = new THREE.Group();
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d")!;
+
+    // Dark void center with purple energy rings
+    const radialGrad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+    radialGrad.addColorStop(0, "#000000");
+    radialGrad.addColorStop(0.35, "#0a0020");
+    radialGrad.addColorStop(0.65, "#220055");
+    radialGrad.addColorStop(0.85, "#4400aa");
+    radialGrad.addColorStop(1, "#6600cc");
+    ctx.fillStyle = radialGrad;
+    ctx.beginPath();
+    ctx.arc(64, 64, 62, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Energy ring lines
+    ctx.globalAlpha = 0.7;
+    for (let r = 15; r < 60; r += 12) {
+      ctx.strokeStyle = `rgba(${140 + r}, 0, ${200 + r * 0.5}, 0.6)`;
+      ctx.lineWidth = r < 30 ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(64, 64, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Spark streaks
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const r1 = 20 + Math.random() * 10;
+      const r2 = 48 + Math.random() * 12;
+      ctx.strokeStyle = "#aa44ff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(64 + Math.cos(angle) * r1, 64 + Math.sin(angle) * r1);
+      ctx.lineTo(64 + Math.cos(angle + 0.3) * r2, 64 + Math.sin(angle + 0.3) * r2);
+      ctx.stroke();
+    }
+
+    const voidMap = new THREE.CanvasTexture(canvas);
+    voidMap.colorSpace = THREE.SRGBColorSpace;
+    voidMap.needsUpdate = true;
+
+    const tile = new THREE.Mesh(
+      new THREE.CircleGeometry(0.85, 32),
+      new THREE.MeshBasicMaterial({
+        map: voidMap,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    tile.rotation.x = -Math.PI / 2;
+    tile.position.y = 0.012;
+    group.add(tile);
+
+    // Outer glow ring
+    const outerGlow = new THREE.Mesh(
+      new THREE.RingGeometry(0.82, 1.08, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x6600cc,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    outerGlow.rotation.x = -Math.PI / 2;
+    outerGlow.position.y = 0.008;
+    group.add(outerGlow);
+
     return group;
   }
 
