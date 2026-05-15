@@ -310,11 +310,12 @@ export class MouseRace3D {
 
     this.overlay.button.addEventListener("click", () => this.advanceOverlayFlow());
     this.hud.scoutButton.addEventListener("click", () => this.activateScoutPeek());
+    const fullscreenTarget = this.host.parentElement ?? document.documentElement;
     const toggleFullscreen = (): void => {
       if (document.fullscreenElement) {
         void document.exitFullscreen();
       } else {
-        void this.host.requestFullscreen();
+        void fullscreenTarget.requestFullscreen();
       }
     };
     this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", toggleFullscreen);
