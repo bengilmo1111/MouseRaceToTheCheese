@@ -41,34 +41,55 @@
           <div class="screen-card hero-card">
             <div class="hero-badge">3D Maze Race</div>
             <h1>Mouse Race To The Cheese</h1>
-            <p>
-              Start in kid-friendly mazes that feel playful first: collect just enough keys, use paired teleport gems,
-              dodge traps, slip past the cat, and reach the parmesan before Alice crawls in from outside.
-            </p>
-            <div class="difficulty-picker" aria-label="Difficulty level">
-              <button class="difficulty-btn active" type="button" data-difficulty="easy" aria-pressed="true">
-                <strong>Kid</strong>
-                <span>1 key · no life lost on bumps</span>
-              </button>
-              <button class="difficulty-btn" type="button" data-difficulty="medium" aria-pressed="false">
-                <strong>Medium</strong>
-                <span>2 keys · gentler chase</span>
-              </button>
-              <button class="difficulty-btn" type="button" data-difficulty="hard" aria-pressed="false">
-                <strong>Hard</strong>
-                <span>All keys · full challenge</span>
-              </button>
+            <div class="picker-section">
+              <div class="picker-label">Choose Maze</div>
+              <div class="maze-picker" aria-label="Maze selection">
+                <button class="maze-btn active" type="button" data-maze="0" aria-pressed="true">
+                  <span class="maze-icon">📦</span>
+                  <strong>Cardboard</strong>
+                  <span>Cheese Run</span>
+                </button>
+                <button class="maze-btn" type="button" data-maze="1" aria-pressed="false">
+                  <span class="maze-icon">❤️</span>
+                  <strong>Sweetheart</strong>
+                  <span>Catacombs</span>
+                </button>
+                <button class="maze-btn" type="button" data-maze="2" aria-pressed="false">
+                  <span class="maze-icon">🌙</span>
+                  <strong>Midnight</strong>
+                  <span>Megamaze</span>
+                </button>
+              </div>
             </div>
-            <div class="hero-notes">
-              <span>Up/Down (W/S or ↑/↓): forward & back</span>
-              <span>Left/Right (A/D or ←/→): turn the mouse</span>
-              <span>Touch: hold the movement pads</span>
-              <span>Scout view: press M or 🔭 to zoom up</span>
-              <span>Kid mode: 2 crumbs earn 1 extra life</span>
-              <span>Green crumbs reveal a path to keys or cheese</span>
-              <span>Key goals grow from Kid to Hard</span>
-              <span>Teleport gems now come in working pairs</span>
+            <div class="picker-section">
+              <div class="picker-label">Difficulty</div>
+              <div class="difficulty-picker" aria-label="Difficulty level">
+                <button class="difficulty-btn active" type="button" data-difficulty="easy" aria-pressed="true">
+                  <strong>Kid</strong>
+                  <span>1 key · no life lost on bumps</span>
+                </button>
+                <button class="difficulty-btn" type="button" data-difficulty="medium" aria-pressed="false">
+                  <strong>Medium</strong>
+                  <span>2 keys · gentler chase</span>
+                </button>
+                <button class="difficulty-btn" type="button" data-difficulty="hard" aria-pressed="false">
+                  <strong>Hard</strong>
+                  <span>All keys · full challenge</span>
+                </button>
+              </div>
             </div>
+            <details class="hero-controls">
+              <summary>Controls &amp; Tips</summary>
+              <div class="hero-notes">
+                <span><kbd>W</kbd><kbd>S</kbd><kbd>↑</kbd><kbd>↓</kbd> Move</span>
+                <span><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> Turn</span>
+                <span><kbd>M</kbd> or 🔭 Scout view</span>
+                <span>Touch: hold the movement pads</span>
+                <span>Crumbs → extra lives</span>
+                <span>Green crumbs show the path</span>
+                <span>Gems teleport in pairs</span>
+              </div>
+            </details>
             <button id="start-btn" class="primary-btn" type="button">Start Race</button>
           </div>
         </div>

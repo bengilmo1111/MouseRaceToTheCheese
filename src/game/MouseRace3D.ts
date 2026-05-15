@@ -142,6 +142,7 @@ export class MouseRace3D {
   };
 
   private levelIndex = 0;
+  private startLevelIndex = 0;
   private lives = 3;
   private crumbs = 0;
   private extraLifeBank = 0;
@@ -295,6 +296,7 @@ export class MouseRace3D {
 
   private bindUi(): void {
     this.bindDifficultyPicker();
+    this.bindMazePicker();
 
     this.must<HTMLButtonElement>("start-btn").addEventListener("click", () => {
       this.startRun(true);
@@ -434,6 +436,26 @@ export class MouseRace3D {
     }
   }
 
+  private bindMazePicker(): void {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-maze]"));
+    const setMaze = (index: number): void => {
+      this.startLevelIndex = index;
+      buttons.forEach((button) => {
+        const isActive = Number(button.dataset.maze) === index;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    };
+
+    buttons.forEach((button) => {
+      const index = Number(button.dataset.maze);
+      if (isNaN(index) || index < 0 || index >= LEVELS.length) return;
+      button.addEventListener("click", () => setMaze(index));
+    });
+
+    setMaze(0);
+  }
+
   private bindPlaytestUi(): void {
     const params = new URLSearchParams(window.location.search);
     const showPanel = params.get("playtest") === "1" || window.location.hash.includes("playtest");
@@ -493,7 +515,7 @@ export class MouseRace3D {
     }
 
     this.hud.root.classList.remove("hidden");
-    this.levelIndex = 0;
+    this.levelIndex = this.startLevelIndex;
     this.lives = DIFFICULTY_SETTINGS[this.difficulty].startingLives;
     this.crumbs = 0;
     this.extraLifeBank = 0;
@@ -503,7 +525,7 @@ export class MouseRace3D {
     this.wasScoutPeekActive = false;
     this.hasWonGame = false;
     this.hasSeenIntro = false;
-    this.loadLevel(0);
+    this.loadLevel(this.startLevelIndex);
     this.showIntro();
   }
 
