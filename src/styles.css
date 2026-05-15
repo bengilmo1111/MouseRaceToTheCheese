@@ -374,6 +374,7 @@ input {
   font-size: clamp(18px, 2.6vw, 24px);
   line-height: 1.45;
   color: #4f4026;
+  white-space: pre-line;
 }
 
 .overlay-icon {
