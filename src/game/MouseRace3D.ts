@@ -746,7 +746,6 @@ export class MouseRace3D {
           const trap = this.buildMouseTrap();
           trap.position.set(x, 0.05, z);
           trap.rotation.y = Math.random() * Math.PI;
-          trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone(), kind: "trap" });
 
@@ -771,7 +770,6 @@ export class MouseRace3D {
         if (cell === "L") {
           const lavaTile = this.buildLavaPit();
           lavaTile.position.set(x, 0.01, z);
-          lavaTile.add(this.createWorldMarker("LAVA", 0xff8040, 0xcc2800, 0.85));
           group.add(lavaTile);
           traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
           const glow = new THREE.Mesh(
@@ -789,7 +787,6 @@ export class MouseRace3D {
         if (cell === "~") {
           const waterTile = this.buildWaterTrap();
           waterTile.position.set(x, 0.01, z);
-          waterTile.add(this.createWorldMarker("WATER", 0x50d0ff, 0x0044cc, 0.85));
           group.add(waterTile);
           traps.push({ mesh: waterTile, position: waterTile.position.clone(), kind: "water" });
           for (let ri = 0; ri < 3; ri += 1) {
