@@ -19,6 +19,7 @@
         <div id="game-container"></div>
         <div id="hud" class="hidden">
           <div class="hud-left">
+            <div id="hud-level" class="hud-pill hud-pill-sm"></div>
             <div id="hud-status" class="hud-pill"></div>
           </div>
           <div class="hud-center">
@@ -90,11 +91,15 @@
                 <span>Gems teleport in pairs</span>
               </div>
             </details>
-            <button id="start-btn" class="primary-btn" type="button">Start Race</button>
+            <div class="start-row">
+              <button id="start-btn" class="primary-btn" type="button">Start Race</button>
+              <button id="start-fullscreen-btn" class="fullscreen-hint-btn" type="button" aria-label="Play fullscreen">⛶ Fullscreen</button>
+            </div>
           </div>
         </div>
         <div id="overlay" class="screen hidden">
           <div class="screen-card">
+            <img id="overlay-icon" class="overlay-icon hidden" alt="" />
             <h2 id="overlay-title"></h2>
             <p id="overlay-body"></p>
             <button id="overlay-btn" class="primary-btn" type="button">Continue</button>

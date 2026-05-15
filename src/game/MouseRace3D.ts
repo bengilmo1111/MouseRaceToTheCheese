@@ -182,10 +182,10 @@ export class MouseRace3D {
   };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
-  private alice!: THREE.Group;
 
   private readonly hud = {
     root: this.must<HTMLDivElement>("hud"),
+    level: this.must<HTMLDivElement>("hud-level"),
     status: this.must<HTMLDivElement>("hud-status"),
     toast: this.must<HTMLDivElement>("hud-toast"),
     vignette: this.must<HTMLDivElement>("vignette"),
@@ -207,6 +207,7 @@ export class MouseRace3D {
     title: this.must<HTMLHeadingElement>("overlay-title"),
     body: this.must<HTMLParagraphElement>("overlay-body"),
     button: this.must<HTMLButtonElement>("overlay-btn"),
+    icon: this.must<HTMLImageElement>("overlay-icon"),
   };
   private readonly touchControls = this.must<HTMLDivElement>("touch-controls");
   private readonly playtest = {
@@ -290,9 +291,8 @@ export class MouseRace3D {
     this.player = this.buildMouse();
     this.cat = this.buildCat();
     this.cheese = this.buildCheese();
-    this.alice = this.buildAlice();
 
-    this.scene.add(this.player, this.cat, this.cheese, this.alice);
+    this.scene.add(this.player, this.cat, this.cheese);
   }
 
   private bindUi(): void {
@@ -305,13 +305,15 @@ export class MouseRace3D {
 
     this.overlay.button.addEventListener("click", () => this.advanceOverlayFlow());
     this.hud.scoutButton.addEventListener("click", () => this.activateScoutPeek());
-    this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", () => {
+    const toggleFullscreen = (): void => {
       if (document.fullscreenElement) {
         void document.exitFullscreen();
       } else {
         void this.host.requestFullscreen();
       }
-    });
+    };
+    this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", toggleFullscreen);
+    this.must<HTMLButtonElement>("start-fullscreen-btn").addEventListener("click", toggleFullscreen);
 
     const muteBtn = this.must<HTMLButtonElement>("mute-btn");
     const refreshMuteIcon = (): void => {
@@ -565,7 +567,6 @@ export class MouseRace3D {
     this.footstepAccum = 0;
     this.catChasing = false;
     this.hud.vignette.classList.remove("active");
-    this.updateAlicePosition(0);
     this.updateTheme(LEVELS[index]);
     this.rebuildScoutPins();
     this.refreshHud();
@@ -858,20 +859,6 @@ export class MouseRace3D {
     outerRing.rotation.x = Math.PI / 2;
     outerRing.position.y = -0.1;
     group.add(outerRing);
-
-    const aliceLane = new THREE.Mesh(
-      new THREE.TorusGeometry(Math.max(width, depth) * 0.57, 0.12, 10, 72),
-      new THREE.MeshStandardMaterial({
-        color: level.theme.accent,
-        emissive: level.theme.accent,
-        emissiveIntensity: 0.2,
-        transparent: true,
-        opacity: 0.45,
-      }),
-    );
-    aliceLane.rotation.x = Math.PI / 2;
-    aliceLane.position.y = 0.02;
-    group.add(aliceLane);
 
     return {
       map: level.map,
@@ -1395,33 +1382,6 @@ export class MouseRace3D {
     const catchPin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.16), metalDarkMat);
     catchPin.position.set(0, 0.155, 0.36);
     group.add(catchPin);
-
-    return group;
-  }
-
-  private buildAlice(): THREE.Group {
-    const group = new THREE.Group();
-    const skin = new THREE.MeshStandardMaterial({ color: 0xffdfd8, roughness: 0.75 });
-    const onesie = new THREE.MeshStandardMaterial({ color: 0xff8aaa, roughness: 0.62 });
-
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 14), onesie);
-    body.scale.set(1.35, 0.8, 1.1);
-    body.position.y = 0.18;
-    body.castShadow = true;
-    group.add(body);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 14), skin);
-    head.position.set(0, 0.38, -0.16);
-    head.castShadow = true;
-    group.add(head);
-
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.34, 10), skin);
-      arm.position.set(side * 0.28, 0.1, 0.2);
-      arm.rotation.z = side * (Math.PI / 2.7);
-      arm.castShadow = true;
-      group.add(arm);
-    }
 
     return group;
   }
@@ -2474,7 +2434,6 @@ export class MouseRace3D {
     const level = LEVELS[this.levelIndex];
     this.aliceElapsedMs += delta * 1000;
     const progress = THREE.MathUtils.clamp(this.aliceElapsedMs / this.getAliceTimeMs(level), 0, 1);
-    this.updateAlicePosition(progress);
     this.hud.timerFill.style.transform = `scaleX(${1 - progress})`;
     this.hud.timerAlice.style.setProperty("--alice-progress", progress.toString());
     this.hud.timerAlice.setAttribute("aria-label", `Alice is ${Math.round(progress * 100)}% of the way to the cheese`);
@@ -2489,8 +2448,24 @@ export class MouseRace3D {
 
     if (progress >= 1) {
       this.aliceElapsedMs = 0;
-      this.triggerHazard("Alice reached the parmesan first!");
+      this.triggerAliceWin();
     }
+  }
+
+  private triggerAliceWin(): void {
+    if (performance.now() < this.hazardLockedUntil || this.isOverlayOpen()) {
+      return;
+    }
+
+    this.hazardLockedUntil = performance.now() + this.hazardGraceMs;
+    this.audio.playGameOver();
+    this.lives = 0;
+    this.refreshHud();
+    this.showOverlay(
+      "Alice Wins!",
+      "She reached the parmesan first. Better luck next race.",
+      "alice",
+    );
   }
 
   private getCatSpeed(level: LevelDefinition): number {
@@ -2499,16 +2474,6 @@ export class MouseRace3D {
 
   private getAliceTimeMs(level: LevelDefinition): number {
     return level.aliceTimeMs * DIFFICULTY_SETTINGS[this.difficulty].aliceTimeMultiplier;
-  }
-
-  private updateAlicePosition(progress: number): void {
-    const angle = progress * Math.PI * 2 + Math.PI * 0.22;
-    const radiusX = this.maze.mazeWidth * 0.58;
-    const radiusZ = this.maze.mazeDepth * 0.58;
-    const x = Math.cos(angle) * radiusX;
-    const z = Math.sin(angle) * radiusZ;
-    this.alice.position.set(x, 0.18 + Math.sin(progress * Math.PI * 20) * 0.03, z);
-    this.alice.lookAt(this.cheese.position.x, 0.2, this.cheese.position.z);
   }
 
   private collectScoutCrumb(): void {
@@ -2776,11 +2741,11 @@ export class MouseRace3D {
 
     if (this.lives <= 0) {
       this.audio.playGameOver();
-      this.showOverlay("Game Over", `${message}\nAlice wins this race. Try again from the first maze.`);
+      this.showOverlay("Game Over", `${message}\nTry again from the first maze.`, "alice");
       return;
     }
 
-    this.showOverlay("Ouch", `${message}\nYou still have ${this.lives} lives left.`);
+    this.showOverlay("Ouch!", `${message}\nYou still have ${this.lives} ${this.lives === 1 ? "life" : "lives"} left.`);
   }
 
   private completeLevel(): void {
@@ -2793,22 +2758,32 @@ export class MouseRace3D {
     if (this.levelIndex === LEVELS.length - 1) {
       this.hasWonGame = true;
       this.showOverlay(
-        "You Win",
+        "You Win!",
         "You beat Alice through every maze and reached the final parmesan wedge.",
+        "cheese",
       );
       return;
     }
 
-    this.showOverlay("Cheese Reached", "Alice is still outside. Step into the next maze.");
+    this.showOverlay("Cheese Reached!", "Alice is still outside. Step into the next maze.", "cheese");
   }
 
   private isOverlayOpen(): boolean {
     return !this.overlay.root.classList.contains("hidden") || !this.startScreen.classList.contains("hidden");
   }
 
-  private showOverlay(title: string, body: string): void {
+  private showOverlay(title: string, body: string, icon?: "alice" | "cheese"): void {
     this.overlay.title.textContent = title;
     this.overlay.body.textContent = body;
+    if (icon === "alice") {
+      this.overlay.icon.src = "/src/Images/file_00000000e9d0720b907b128f233c1f66.png";
+      this.overlay.icon.classList.remove("hidden");
+    } else if (icon === "cheese") {
+      this.overlay.icon.src = "/src/Images/cheese_circular_crop.png";
+      this.overlay.icon.classList.remove("hidden");
+    } else {
+      this.overlay.icon.classList.add("hidden");
+    }
     this.overlay.root.classList.remove("hidden");
   }
 
@@ -2887,15 +2862,18 @@ export class MouseRace3D {
 
   private refreshHud(): void {
     const level = LEVELS[this.levelIndex];
-    const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, 3 - this.lives));
+    const diff = DIFFICULTY_SETTINGS[this.difficulty];
+    const maxLives = diff.startingLives;
+    const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, maxLives - this.lives));
+    const keysLeft = this.remainingRequiredCheeseKeys();
+    const keysTotal = this.totalRequiredCheeseKeys();
+    this.hud.level.textContent = `${diff.label} · L${level.id}`;
+    this.hud.level.style.color = level.theme.hud;
     this.hud.status.innerHTML =
-      `<span class="level">${DIFFICULTY_SETTINGS[this.difficulty].label} · L${level.id} · ${level.title}</span>` +
-      `<span class="sep">·</span>` +
       `<span class="hearts">${hearts}</span>` +
       `<span class="sep">·</span>` +
       `<span>🧀 ${this.crumbs}</span>` +
-      `<span class="sep">·</span>` +
-      `<span>🔑 ${this.remainingRequiredCheeseKeys()}/${this.totalRequiredCheeseKeys()}</span>`;
+      (keysTotal > 0 ? `<span class="sep">·</span><span>🔑 ${keysLeft}/${keysTotal}</span>` : "");
     this.hud.status.style.color = level.theme.hud;
     this.refreshScoutButton();
     this.updateGuidanceHud();
