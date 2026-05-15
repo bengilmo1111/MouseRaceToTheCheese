@@ -1187,3 +1187,36 @@ kbd {
     max-height: 55vh;
   }
 }
+
+button:focus-visible,
+summary:focus-visible {
+  outline: 4px solid rgba(69, 167, 255, 0.82);
+  outline-offset: 3px;
+}
+
+#game-container canvas,
+.hud-toast,
+.scout-pin,
+.touch-btn,
+.primary-btn,
+.hud-button {
+  will-change: transform;
+}
+
+#hud,
+.screen-card,
+.touch-pad,
+.scout-pin {
+  contain: layout paint;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
