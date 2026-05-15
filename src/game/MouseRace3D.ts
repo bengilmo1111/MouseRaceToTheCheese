@@ -310,11 +310,12 @@ export class MouseRace3D {
 
     this.overlay.button.addEventListener("click", () => this.advanceOverlayFlow());
     this.hud.scoutButton.addEventListener("click", () => this.activateScoutPeek());
+    const fullscreenTarget = this.host.parentElement ?? document.documentElement;
     const toggleFullscreen = (): void => {
       if (document.fullscreenElement) {
         void document.exitFullscreen();
       } else {
-        void this.host.requestFullscreen();
+        void fullscreenTarget.requestFullscreen();
       }
     };
     this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", toggleFullscreen);
@@ -746,7 +747,6 @@ export class MouseRace3D {
           const trap = this.buildMouseTrap();
           trap.position.set(x, 0.05, z);
           trap.rotation.y = Math.random() * Math.PI;
-          trap.add(this.createWorldMarker("TRAP", 0xff8b73, 0xc94f3e, 0.95));
           group.add(trap);
           traps.push({ mesh: trap, position: trap.position.clone(), kind: "trap" });
 
@@ -771,7 +771,6 @@ export class MouseRace3D {
         if (cell === "L") {
           const lavaTile = this.buildLavaPit();
           lavaTile.position.set(x, 0.01, z);
-          lavaTile.add(this.createWorldMarker("LAVA", 0xff8040, 0xcc2800, 0.85));
           group.add(lavaTile);
           traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
           const glow = new THREE.Mesh(
@@ -789,7 +788,6 @@ export class MouseRace3D {
         if (cell === "~") {
           const waterTile = this.buildWaterTrap();
           waterTile.position.set(x, 0.01, z);
-          waterTile.add(this.createWorldMarker("WATER", 0x50d0ff, 0x0044cc, 0.85));
           group.add(waterTile);
           traps.push({ mesh: waterTile, position: waterTile.position.clone(), kind: "water" });
           for (let ri = 0; ri < 3; ri += 1) {
@@ -856,18 +854,7 @@ export class MouseRace3D {
       gem.pairIndex = gems.length > 1 ? (indexGem + 1) % gems.length : undefined;
     });
 
-    const outerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(Math.max(width, depth) * 0.56, 0.5, 12, 48),
-      new THREE.MeshStandardMaterial({
-        color: level.theme.trim,
-        transparent: true,
-        opacity: 0.35,
-        roughness: 0.85,
-      }),
-    );
-    outerRing.rotation.x = Math.PI / 2;
-    outerRing.position.y = -0.1;
-    group.add(outerRing);
+
 
     return {
       map: level.map,
