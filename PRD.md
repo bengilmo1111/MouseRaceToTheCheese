@@ -28,3 +28,4 @@
 - [x] Level 3: Midnight Octagon maze implemented
 - [x] Implemented Web Audio API for interactive SFX (pickups, damage, teleports)
 - [x] Added visual "juice" (camera shake on damage, hover animations for pickups, waddle animations for characters)
+- [x] Kid-friendly pass: glowing compass arrow in Kid mode (points to next key/cheese), confetti celebration on level complete, short encouraging emoji messages, longer toast read time
