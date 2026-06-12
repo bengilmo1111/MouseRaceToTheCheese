@@ -441,6 +441,11 @@ input {
   transform: translateY(-1px);
 }
 
+.controls-picker {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 440px;
+}
+
 .picker-section {
   margin-bottom: 16px;
 }
@@ -726,6 +731,52 @@ kbd {
   border-color: rgba(255, 248, 219, 0.72);
   color: #fff;
   box-shadow: 0 6px 14px rgba(28, 18, 7, 0.22), inset 0 0 0 2px rgba(255, 255, 255, 0.16);
+}
+
+/* Simple scheme shows a single 4-way D-pad; Classic shows steer + drive pads */
+.touch-pad-dpad {
+  left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+}
+
+#touch-controls .touch-pad-dpad {
+  display: none;
+}
+
+#touch-controls.scheme-simple .touch-pad-dpad {
+  display: grid;
+}
+
+#touch-controls.scheme-simple .touch-pad-steer,
+#touch-controls.scheme-simple .touch-pad-drive {
+  display: none;
+}
+
+.dpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 8px;
+  justify-items: center;
+  align-items: center;
+}
+
+.dpad-grid .dpad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dpad-grid .dpad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dpad-grid .dpad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.dpad-grid .dpad-down {
+  grid-column: 2;
+  grid-row: 3;
 }
 
 @media (pointer: coarse), (max-width: 900px) {
@@ -1053,6 +1104,14 @@ kbd {
 
   .touch-pad-drive {
     right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+  }
+
+  .touch-pad-dpad {
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+  }
+
+  .dpad-grid {
+    gap: 6px;
   }
 
   .touch-btn {

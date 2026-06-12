@@ -84,13 +84,26 @@
                 </button>
               </div>
             </div>
+            <div class="picker-section">
+              <div class="picker-label">Controls</div>
+              <div class="difficulty-picker controls-picker" aria-label="Control style">
+                <button class="difficulty-btn active" type="button" data-controls="simple" aria-pressed="true">
+                  <strong>Simple</strong>
+                  <span>Press where you want to go</span>
+                </button>
+                <button class="difficulty-btn" type="button" data-controls="classic" aria-pressed="false">
+                  <strong>Classic</strong>
+                  <span>Turn and drive like a car</span>
+                </button>
+              </div>
+            </div>
             <details class="hero-controls">
               <summary>Controls &amp; Tips</summary>
               <div class="hero-notes">
-                <span><kbd>W</kbd><kbd>S</kbd><kbd>↑</kbd><kbd>↓</kbd> Move</span>
-                <span><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd> Turn</span>
+                <span>Simple: press the direction you want to go</span>
+                <span>Classic: <kbd>←</kbd><kbd>→</kbd> turn · <kbd>↑</kbd><kbd>↓</kbd> drive</span>
                 <span><kbd>M</kbd> or 🔭 Scout view</span>
-                <span>Touch: hold the movement pads</span>
+                <span>Touch: hold the movement pad</span>
                 <span>Crumbs → extra lives</span>
                 <span>Green crumbs show the path</span>
                 <span>Gems teleport in pairs</span>
@@ -112,6 +125,15 @@
           </div>
         </div>
         <div id="touch-controls" aria-label="Touch movement controls">
+          <div class="touch-pad touch-pad-dpad" aria-label="Direction pad">
+            <div class="touch-pad-label">Move</div>
+            <div class="dpad-grid">
+              <button id="dpad-up" class="touch-btn arrow dpad-up" type="button" aria-label="Move up">▲</button>
+              <button id="dpad-left" class="touch-btn arrow dpad-left" type="button" aria-label="Move left">◀</button>
+              <button id="dpad-right" class="touch-btn arrow dpad-right" type="button" aria-label="Move right">▶</button>
+              <button id="dpad-down" class="touch-btn arrow dpad-down" type="button" aria-label="Move down">▼</button>
+            </div>
+          </div>
           <div class="touch-pad touch-pad-steer" aria-label="Steering controls">
             <div class="touch-pad-label">Steer</div>
             <div class="touch-row separated">
