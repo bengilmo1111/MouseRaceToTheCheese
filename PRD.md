@@ -29,3 +29,4 @@
 - [x] Implemented Web Audio API for interactive SFX (pickups, damage, teleports)
 - [x] Added visual "juice" (camera shake on damage, hover animations for pickups, waddle animations for characters)
 - [x] Kid-friendly pass: glowing compass arrow in Kid mode (points to next key/cheese), confetti celebration on level complete, short encouraging emoji messages, longer toast read time
+- [x] Simple control scheme (default): press the direction you want to go (camera-relative with yaw latching); touch uses a single 4-way D-pad; old tank controls kept as "Classic" via start-screen picker
