@@ -196,6 +196,8 @@ export class MouseRace3D {
   };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
+  private cheeseCompass!: THREE.Group;
+  private compassMaterial!: THREE.MeshBasicMaterial;
 
   private readonly hud = {
     root: this.must<HTMLDivElement>("hud"),
@@ -311,8 +313,9 @@ export class MouseRace3D {
     this.player = this.buildMouse();
     this.cat = this.buildCat();
     this.cheese = this.buildCheese();
+    this.cheeseCompass = this.buildCompassArrow();
 
-    this.scene.add(this.player, this.cat, this.cheese);
+    this.scene.add(this.player, this.cat, this.cheese, this.cheeseCompass);
   }
 
   private bindUi(): void {
@@ -1232,6 +1235,65 @@ export class MouseRace3D {
     return group;
   }
 
+  private buildCompassArrow(): THREE.Group {
+    const group = new THREE.Group();
+    this.compassMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd84a,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+    });
+
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 12), this.compassMaterial);
+    head.rotation.x = -Math.PI / 2;
+    head.position.z = -0.36;
+    group.add(head);
+
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.36, 10), this.compassMaterial);
+    tail.rotation.x = Math.PI / 2;
+    tail.position.z = -0.02;
+    group.add(tail);
+
+    group.visible = false;
+    return group;
+  }
+
+  private updateCheeseCompass(now: number): void {
+    if (
+      !this.maze ||
+      this.difficulty !== "easy" ||
+      this.isScoutPeekActive() ||
+      this.isOverlayOpen() ||
+      this.paused
+    ) {
+      this.cheeseCompass.visible = false;
+      return;
+    }
+
+    const needsKey = this.remainingRequiredCheeseKeys() > 0;
+    const target = needsKey ? this.getNearestActiveCheeseKey()?.position : this.cheese.position;
+    if (!target) {
+      this.cheeseCompass.visible = false;
+      return;
+    }
+
+    const dx = target.x - this.player.position.x;
+    const dz = target.z - this.player.position.z;
+    if (Math.hypot(dx, dz) < 2.4) {
+      this.cheeseCompass.visible = false;
+      return;
+    }
+
+    this.cheeseCompass.visible = true;
+    this.compassMaterial.color.setHex(needsKey ? 0xb879ff : 0xffd84a);
+    this.cheeseCompass.position.set(
+      this.player.position.x,
+      this.player.position.y + 1.5 + Math.sin(now * 0.004) * 0.09,
+      this.player.position.z,
+    );
+    this.cheeseCompass.rotation.y = Math.atan2(-dx, -dz);
+  }
+
   private buildGem(accentColor: number): THREE.Group {
     const group = new THREE.Group();
 
@@ -2136,6 +2198,7 @@ export class MouseRace3D {
     this.updateScoutPins();
     this.animateMouse(now);
     this.updatePlayerLight();
+    this.updateCheeseCompass(now);
 
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
@@ -2324,7 +2387,7 @@ export class MouseRace3D {
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
-      this.flashHint(shouldChase ? "Cat spotted you!" : "Cat lost you.", shouldChase);
+      this.flashHint(shouldChase ? "🐱 The cat spotted you — run!" : "Phew! The cat lost you. 😅", shouldChase);
       if (shouldChase) this.audio.playCatAlert();
       else this.audio.playCatLost();
       this.hud.vignette.classList.toggle("active", shouldChase);
@@ -2368,7 +2431,7 @@ export class MouseRace3D {
         if (this.extraLifeBank >= crumbsForLife) {
           this.extraLifeBank = 0;
           this.lives += 1;
-          this.flashHint(`${crumbsForLife} crumbs earned another life.`);
+          this.flashHint(`🌟 ${crumbsForLife} crumbs — you earned an extra life!`);
           this.audio.playLifeUp();
         } else {
           this.audio.playCrumb();
@@ -2434,7 +2497,12 @@ export class MouseRace3D {
         this.collectedCheeseKeys += 1;
         this.spawnPickupBurst(key.position, 0xffdf5a);
         this.audio.playGem();
-        this.flashHint(`Cheese key found. ${this.remainingRequiredCheeseKeys()} still needed.`);
+        const keysStillNeeded = this.remainingRequiredCheeseKeys();
+        this.flashHint(
+          keysStillNeeded > 0
+            ? `🔑 Key found! ${keysStillNeeded} more to go.`
+            : "🔑 Key found! Now race to the cheese!",
+        );
         this.refreshHud();
       }
     }
@@ -2446,7 +2514,7 @@ export class MouseRace3D {
         this.completeLevel();
       } else if (now > this.cheeseLockHintUntil) {
         this.cheeseLockHintUntil = now + 1800;
-        this.flashHint(`${remainingKeys} cheese ${remainingKeys === 1 ? "key" : "keys"} still lock the wedge.`, true);
+        this.flashHint(`🔒 Find ${remainingKeys} more ${remainingKeys === 1 ? "key" : "keys"} to unlock the cheese!`, true);
       }
     }
   }
@@ -2463,14 +2531,14 @@ export class MouseRace3D {
   private revealObjectivePath(): void {
     const objective = this.getNextObjectivePath();
     if (!objective) {
-      this.flashHint("Green crumb found. The cheese is already close.");
+      this.flashHint("💚 Green crumb! The cheese is really close!");
       return;
     }
 
     this.renderGuideTrail(objective.path);
     this.guideTrailUntil = performance.now() + 9000;
     this.guideTrailTarget = objective.label;
-    this.flashHint(`Green crumb trail: follow it to the ${objective.label}.`);
+    this.flashHint(`💚 Green crumb! Follow the glowing trail to the ${objective.label}!`);
     this.audio.playGem();
   }
 
@@ -2716,7 +2784,7 @@ export class MouseRace3D {
     this.gemCooldownUntil = performance.now() + 900;
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
     this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.22);
-    this.flashHint("Zip. The teleport gem shifted the maze under you.");
+    this.flashHint("✨ Whoosh! The gem teleported you!");
     this.audio.playGem();
   }
 
@@ -2752,8 +2820,8 @@ export class MouseRace3D {
     this.lives = 0;
     this.refreshHud();
     this.showOverlay(
-      "Alice Wins!",
-      "She reached the parmesan first. Better luck next race.",
+      "Alice Got It First!",
+      "Baby Alice grabbed the cheese this time! 🍼 Be speedy — you'll beat her next race!",
       "alice",
     );
   }
@@ -2774,7 +2842,7 @@ export class MouseRace3D {
 
     this.scoutCrumbBank = 0;
     this.scoutPeeks += 1;
-    this.flashHint("Scout peek earned. Press M or 🔭 for a maze view.");
+    this.flashHint("🔭 Scout peek earned! Press M or 🔭 to see the whole maze.");
     this.refreshScoutButton();
   }
 
@@ -2790,7 +2858,7 @@ export class MouseRace3D {
     }
 
     if (this.scoutPeeks <= 0) {
-      this.flashHint(`Collect ${SCOUT_CRUMBS_PER_CHARGE} crumbs to earn another scout peek.`, true);
+      this.flashHint(`Munch ${SCOUT_CRUMBS_PER_CHARGE} crumbs to earn another scout peek! 🔭`, true);
       return;
     }
 
@@ -2800,7 +2868,7 @@ export class MouseRace3D {
     this.wasScoutPeekActive = true;
     this.currentSpeed = 0;
     this.targetSpeed = 0;
-    this.flashHint("Scout peek: the race pauses while you look for keys and cheese.");
+    this.flashHint("🗺️ Scout view! The race is paused — spot the keys and cheese!");
     this.audio.playGem();
     this.refreshScoutButton();
   }
@@ -2953,7 +3021,20 @@ export class MouseRace3D {
     return Math.max(2.6, maxDist);
   }
 
-  private spawnPickupBurst(at: THREE.Vector3, color: number): void {
+  private spawnCelebration(center: THREE.Vector3): void {
+    const colors = [0xff6b6b, 0xffd84a, 0x6bd9ff, 0x77f27a, 0xb879ff, 0xff9bbf];
+    colors.forEach((color, index) => {
+      const angle = (index / colors.length) * Math.PI * 2;
+      const at = new THREE.Vector3(
+        center.x + Math.cos(angle) * 1.1,
+        center.y + 0.6 + (index % 3) * 0.4,
+        center.z + Math.sin(angle) * 1.1,
+      );
+      this.spawnPickupBurst(at, color, 1600);
+    });
+  }
+
+  private spawnPickupBurst(at: THREE.Vector3, color: number, lifeMs = 600): void {
     const count = 14;
     const positions = new Float32Array(count * 3);
     const velocities = new Float32Array(count * 3);
@@ -2979,7 +3060,7 @@ export class MouseRace3D {
     });
     const points = new THREE.Points(geom, mat);
     this.scene.add(points);
-    this.pickupBursts.push({ mesh: points, ageMs: 0, lifeMs: 600 });
+    this.pickupBursts.push({ mesh: points, ageMs: 0, lifeMs });
   }
 
   private updatePickupBursts(delta: number): void {
@@ -3022,7 +3103,7 @@ export class MouseRace3D {
 
     if (DIFFICULTY_SETTINGS[this.difficulty].forgivingHits) {
       this.refreshHud();
-      this.showOverlay("Try Again", `${message}\nNo life lost in Kid mode. Take a breath and keep your keys.`);
+      this.showOverlay("Ouch! You're OK! 💪", `${message}\nDon't worry — no lives lost in Kid mode. Keep going!`);
       return;
     }
 
@@ -3031,11 +3112,11 @@ export class MouseRace3D {
 
     if (this.lives <= 0) {
       this.audio.playGameOver();
-      this.showOverlay("Game Over", `${message}\nTry again from the first maze.`, "alice");
+      this.showOverlay("Oh No!", `${message}\nAll out of lives this time — but every great mouse tries again! 🐭`, "alice");
       return;
     }
 
-    this.showOverlay("Ouch!", `${message}\nYou still have ${this.lives} ${this.lives === 1 ? "life" : "lives"} left.`);
+    this.showOverlay("Ouch!", `${message}\nYou still have ${this.lives} ${this.lives === 1 ? "life" : "lives"} left. You've got this! 💪`);
   }
 
   private completeLevel(): void {
@@ -3045,17 +3126,18 @@ export class MouseRace3D {
 
     this.levelComplete = true;
     this.audio.playLevelComplete();
+    this.spawnCelebration(this.cheese.position);
     if (this.levelIndex === LEVELS.length - 1) {
       this.hasWonGame = true;
       this.showOverlay(
-        "You Win!",
-        "You beat Alice through every maze and reached the final parmesan wedge.",
+        "🎉 You Win! 🎉",
+        "You beat Alice through every single maze! You are the Cheese Champion! 🧀🏆",
         "cheese",
       );
       return;
     }
 
-    this.showOverlay("Cheese Reached!", "Alice is still outside. Step into the next maze.", "cheese");
+    this.showOverlay("🧀 Cheese! 🎉", "You got the cheese before Alice! Ready for the next maze?", "cheese");
   }
 
   private isOverlayOpen(): boolean {
@@ -3103,16 +3185,16 @@ export class MouseRace3D {
     this.resetActors();
   }
 
-  private getIntroTip(): string {
+  private getIntroBody(): string {
     if (this.difficulty === "easy") {
-      return "Kid mode keeps every maze playful: only 1 key is required, bumps do not cost lives, crumbs give lives faster, and Alice takes her time.";
+      return "Beat Baby Alice to the cheese! 🧀 The glowing arrow shows you the way. Munch crumbs for extra lives, grab the key 🔑, and watch out for the cat! 🐱";
     }
 
     if (this.difficulty === "medium") {
-      return "Medium mode asks for 2 keys per maze, gives 4 lives, and keeps the chase gentler than Hard.";
+      return "Medium mode: find 2 keys per maze, with 4 lives and a gentler chase. Grab crumbs, follow green crumb trails, dodge traps, and beat Alice to the wedge!";
     }
 
-    return "Hard mode is the full challenge with every key required and no free bumps.";
+    return "Hard mode: every key required and no free bumps. Grab crumbs, follow green crumb trails, dodge traps and the cat, and beat Alice to the wedge!";
   }
 
   private showIntro(): void {
@@ -3123,7 +3205,7 @@ export class MouseRace3D {
     this.hasSeenIntro = true;
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
-      `${this.getIntroTip()} Use the maze paths in real 3D space. Grab crumbs, collect green crumbs to reveal a trail, collect cheese keys, dodge traps, use paired teleport gems, watch the cat patrol, use scout peeks to zoom up when lost, and beat Alice to the wedge.`,
+      this.getIntroBody(),
     );
   }
 
@@ -3190,7 +3272,7 @@ export class MouseRace3D {
     window.clearTimeout(this.currentHintTimeout);
     this.currentHintTimeout = window.setTimeout(() => {
       this.hud.toast.classList.add("hidden");
-    }, 1600);
+    }, 2600);
   }
 
   private updateTheme(level: LevelDefinition): void {
