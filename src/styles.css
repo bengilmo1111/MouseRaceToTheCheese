@@ -733,9 +733,12 @@ kbd {
   box-shadow: 0 6px 14px rgba(28, 18, 7, 0.22), inset 0 0 0 2px rgba(255, 255, 255, 0.16);
 }
 
-/* Simple scheme shows a single 4-way D-pad; Classic shows steer + drive pads */
+/* Simple scheme shows a single 4-way D-pad; Classic shows steer + drive pads.
+   In portrait it's centered along the bottom so it never overlaps the mouse
+   (which sits low-center); landscape pins it to the left for the thumb. */
 .touch-pad-dpad {
-  left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 #touch-controls .touch-pad-dpad {
