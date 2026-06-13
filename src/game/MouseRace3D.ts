@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { LEVELS, LevelDefinition } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
@@ -51,6 +52,7 @@ type MazeState = {
   rows: number;
   cols: number;
   walls: WallRect[];
+  wallGrid: WallRect[][];
   crumbs: MazePickup[];
   traps: MazeHazard[];
   trapGlows: THREE.Mesh[];
@@ -64,8 +66,6 @@ type MazeState = {
   mazeCenter: THREE.Vector3;
   mazeWidth: number;
   mazeDepth: number;
-  sharedGeometries: THREE.BufferGeometry[];
-  sharedMaterials: THREE.Material[];
 };
 
 type ScoutPin = {
@@ -235,6 +235,11 @@ export class MouseRace3D {
   private readonly playtest = {
     state: this.must<HTMLPreElement>("playtest-state"),
   };
+  private playtestVisible = false;
+
+  private readonly isMobile =
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 900);
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -242,8 +247,10 @@ export class MouseRace3D {
     this.bgMusic.loop = true;
     this.bgMusic.volume = 0.5;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.type = this.isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    // Phones report devicePixelRatio of 2-3; rendering at 3x is the single
+    // biggest framerate cost. Cap mobile at 1.5x — still crisp, far cheaper.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.isMobile ? 1.5 : 2));
     this.host.appendChild(this.renderer.domElement);
 
     this.audio.setMuted(localStorage.getItem(MUTE_KEY) === "1");
@@ -277,7 +284,7 @@ export class MouseRace3D {
     const sun = new THREE.DirectionalLight(0xfff1c7, 2.1);
     sun.position.set(12, 22, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(this.isMobile ? 1024 : 2048, this.isMobile ? 1024 : 2048);
     sun.shadow.camera.left = -28;
     sun.shadow.camera.right = 28;
     sun.shadow.camera.top = 28;
@@ -527,7 +534,12 @@ export class MouseRace3D {
     const panel = document.getElementById("playtest-panel");
     if (panel && showPanel) {
       panel.classList.remove("hidden");
+      this.playtestVisible = true;
     }
+
+    // The agent text hook is lazy, so it costs nothing until called.
+    (window as Window & { render_game_to_text?: () => string }).render_game_to_text = () =>
+      JSON.stringify(this.getStateSnapshot());
 
     const agentApi = {
       state: () => this.getStateSnapshot(),
@@ -545,7 +557,10 @@ export class MouseRace3D {
       setAliceProgress: (ratio: number) => {
         this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * Math.max(0, Math.min(1, ratio));
       },
-      showPanel: () => panel?.classList.remove("hidden"),
+      showPanel: () => {
+        panel?.classList.remove("hidden");
+        this.playtestVisible = true;
+      },
     };
     (window as unknown as { mouseRace?: typeof agentApi }).mouseRace = agentApi;
 
@@ -608,9 +623,8 @@ export class MouseRace3D {
     this.clearGuideTrail();
 
     if (this.maze) {
-      this.maze.sharedGeometries.forEach((g) => g.dispose());
-      this.maze.sharedMaterials.forEach((m) => m.dispose());
       this.scene.remove(this.maze.levelGroup);
+      this.disposeGroup(this.maze.levelGroup);
     }
 
     this.maze = this.buildLevel(LEVELS[index]);
@@ -680,12 +694,6 @@ export class MouseRace3D {
     const hPanelGeo = new THREE.BoxGeometry(panelLength, wallHeight, panelThickness);
     const vPanelGeo = new THREE.BoxGeometry(panelThickness, wallHeight, panelLength);
     const solidGeo = new THREE.BoxGeometry(this.tileSize * wallScale, wallHeight, this.tileSize * wallScale);
-    const sharedGeometries = [hPanelGeo, vPanelGeo, solidGeo, floorGeo];
-    const sharedMaterials: THREE.Material[] = [floorMat];
-    const seenMats = new Set<THREE.Material>();
-    for (const m of wallMaterials) {
-      if (!seenMats.has(m)) { seenMats.add(m); sharedMaterials.push(m); }
-    }
     const tapeMaterial = level.theme.wallStyle === "cardboard"
       ? new THREE.MeshStandardMaterial({ color: 0xe7c783, roughness: 0.9, transparent: true, opacity: 0.82 })
       : level.theme.wallStyle === "stone"
@@ -695,6 +703,29 @@ export class MouseRace3D {
       : level.theme.wallStyle === "metal"
       ? new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.2, transparent: true, opacity: 0.55, emissive: 0x004488, emissiveIntensity: 0.8 })
       : undefined;
+
+    // Wall meshes are batched: instead of one Object3D per cell (hundreds of
+    // draw calls), every wall block's geometry is translated into world space
+    // and merged into a single mesh per material set. The wallGrid lets
+    // collision/camera code look up only the rects near the player.
+    const wallY = wallHeight * 0.5 - 0.02;
+    const wallGeometries: THREE.BufferGeometry[] = [];
+    const tapeGeometries: THREE.BufferGeometry[] = [];
+    const wallGrid: WallRect[][] = Array.from({ length: rows * cols }, () => []);
+    const addWallRect = (row: number, col: number, rect: WallRect): void => {
+      walls.push(rect);
+      wallGrid[row * cols + col].push(rect);
+    };
+    const pushWallGeo = (base: THREE.BoxGeometry, x: number, z: number): void => {
+      const geo = base.clone();
+      geo.translate(x, wallY, z);
+      wallGeometries.push(geo);
+    };
+    const pushTapeGeo = (x: number, z: number, sizeX: number, sizeZ: number): void => {
+      const geo = new THREE.BoxGeometry(sizeX, 0.035, sizeZ);
+      geo.translate(x, wallHeight + 0.015, z);
+      tapeGeometries.push(geo);
+    };
 
     level.map.forEach((line, row) => {
       [...line].forEach((cell, col) => {
@@ -707,15 +738,11 @@ export class MouseRace3D {
             const hasVertical = level.map[row - 1]?.[col] === "#" || level.map[row + 1]?.[col] === "#";
 
             if (hasHorizontal || !hasVertical) {
-              const wall = new THREE.Mesh(hPanelGeo, wallMaterials);
-              wall.position.set(x, wallHeight * 0.5 - 0.02, z);
-              wall.castShadow = true;
-              wall.receiveShadow = true;
-              group.add(wall);
+              pushWallGeo(hPanelGeo, x, z);
               if (tapeMaterial && (row + col) % 7 === 0) {
-                this.addCardboardTape(group, x, z, panelLength * 0.42, panelThickness * 0.55, wallHeight, tapeMaterial, false);
+                pushTapeGeo(x, z, panelLength * 0.42 * 1.55, 0.12);
               }
-              walls.push({
+              addWallRect(row, col, {
                 minX: x - panelLength * 0.5,
                 maxX: x + panelLength * 0.5,
                 minZ: z - panelThickness * 0.5,
@@ -724,15 +751,11 @@ export class MouseRace3D {
             }
 
             if (hasVertical) {
-              const wall = new THREE.Mesh(vPanelGeo, wallMaterials);
-              wall.position.set(x, wallHeight * 0.5 - 0.02, z);
-              wall.castShadow = true;
-              wall.receiveShadow = true;
-              group.add(wall);
+              pushWallGeo(vPanelGeo, x, z);
               if (tapeMaterial && (row + col) % 7 === 3) {
-                this.addCardboardTape(group, x, z, panelThickness * 0.55, panelLength * 0.42, wallHeight, tapeMaterial, true);
+                pushTapeGeo(x, z, 0.12, panelLength * 0.42 * 1.55);
               }
-              walls.push({
+              addWallRect(row, col, {
                 minX: x - panelThickness * 0.5,
                 maxX: x + panelThickness * 0.5,
                 minZ: z - panelLength * 0.5,
@@ -743,15 +766,12 @@ export class MouseRace3D {
           }
 
           const wallHalfSize = (this.tileSize * wallScale) / 2;
-          const wall = new THREE.Mesh(solidGeo, wallMaterials);
-          wall.position.set(x, wallHeight * 0.5 - 0.02, z);
-          wall.castShadow = true;
-          wall.receiveShadow = true;
-          group.add(wall);
+          pushWallGeo(solidGeo, x, z);
           if (tapeMaterial && (row + col) % 5 === 0) {
-            this.addCardboardTape(group, x, z, wallHalfSize, wallHalfSize, wallHeight, tapeMaterial, (row + col) % 2 === 0);
+            const rotate = (row + col) % 2 === 0;
+            pushTapeGeo(x, z, rotate ? 0.12 : wallHalfSize * 1.55, rotate ? wallHalfSize * 1.55 : 0.12);
           }
-          walls.push({
+          addWallRect(row, col, {
             minX: x - wallHalfSize,
             maxX: x + wallHalfSize,
             minZ: z - wallHalfSize,
@@ -927,11 +947,35 @@ export class MouseRace3D {
       });
     });
 
+    // Merge all wall blocks into a single multi-material mesh. BoxGeometry
+    // carries 6 face groups, so useGroups keeps the [side, side, top, ...]
+    // material array working across the whole merged batch.
+    if (wallGeometries.length) {
+      const merged = mergeGeometries(wallGeometries, true);
+      wallGeometries.forEach((geo) => geo.dispose());
+      if (merged) {
+        const wallMesh = new THREE.Mesh(merged, wallMaterials);
+        wallMesh.castShadow = true;
+        wallMesh.receiveShadow = true;
+        group.add(wallMesh);
+      }
+    }
+    if (tapeMaterial && tapeGeometries.length) {
+      const mergedTape = mergeGeometries(tapeGeometries, false);
+      tapeGeometries.forEach((geo) => geo.dispose());
+      if (mergedTape) {
+        const tapeMesh = new THREE.Mesh(mergedTape, tapeMaterial);
+        tapeMesh.receiveShadow = true;
+        group.add(tapeMesh);
+      }
+    }
+    hPanelGeo.dispose();
+    vPanelGeo.dispose();
+    solidGeo.dispose();
+
     gems.forEach((gem, indexGem) => {
       gem.pairIndex = gems.length > 1 ? (indexGem + 1) % gems.length : undefined;
     });
-
-
 
     return {
       map: level.map,
@@ -940,6 +984,7 @@ export class MouseRace3D {
       rows,
       cols,
       walls,
+      wallGrid,
       crumbs,
       traps,
       trapGlows,
@@ -953,8 +998,6 @@ export class MouseRace3D {
       mazeCenter: new THREE.Vector3(0, 0, 0),
       mazeWidth: width,
       mazeDepth: depth,
-      sharedGeometries,
-      sharedMaterials,
     };
   }
 
@@ -2198,23 +2241,24 @@ export class MouseRace3D {
     return group;
   }
 
-  private addCardboardTape(
-    group: THREE.Group,
-    x: number,
-    z: number,
-    halfX: number,
-    halfZ: number,
-    wallHeight: number,
-    material: THREE.Material,
-    rotate: boolean,
-  ): void {
-    const tape = new THREE.Mesh(
-      new THREE.BoxGeometry(rotate ? 0.12 : halfX * 1.55, 0.035, rotate ? halfZ * 1.55 : 0.12),
-      material,
-    );
-    tape.position.set(x, wallHeight + 0.015, z);
-    tape.receiveShadow = true;
-    group.add(tape);
+  // Dispose a level's geometries and materials on unload. Textures are left
+  // alone on purpose: they live in this.textureCache and are reused by later
+  // levels that share a theme.
+  private disposeGroup(group: THREE.Group): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    group.traverse((object) => {
+      const withGeometry = object as Partial<THREE.Mesh>;
+      if (withGeometry.geometry) {
+        geometries.add(withGeometry.geometry);
+      }
+      const material = (object as Partial<THREE.Mesh>).material;
+      if (material) {
+        (Array.isArray(material) ? material : [material]).forEach((item) => materials.add(item));
+      }
+    });
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
   }
 
   private animate = (): void => {
@@ -2463,7 +2507,7 @@ export class MouseRace3D {
   }
 
   private resolveAxis(position: THREE.Vector3, radius: number, axis: "x" | "z"): void {
-    for (const wall of this.maze.walls) {
+    for (const wall of this.nearbyWalls(position.x, position.z)) {
       if (
         position.x + radius <= wall.minX ||
         position.x - radius >= wall.maxX ||
@@ -2487,6 +2531,25 @@ export class MouseRace3D {
         }
       }
     }
+  }
+
+  // Gather wall rects from the 3x3 cell block around a world position. A wall
+  // rect sits at its cell center, so anything close enough to collide lives in
+  // the immediate neighborhood — no need to scan the whole maze each frame.
+  private nearbyWalls(x: number, z: number): WallRect[] {
+    const maze = this.maze;
+    const centerCol = Math.round((x - maze.originX) / this.tileSize);
+    const centerRow = Math.round((z - maze.originZ) / this.tileSize);
+    const result: WallRect[] = [];
+    for (let row = centerRow - 1; row <= centerRow + 1; row += 1) {
+      if (row < 0 || row >= maze.rows) continue;
+      for (let col = centerCol - 1; col <= centerCol + 1; col += 1) {
+        if (col < 0 || col >= maze.cols) continue;
+        const cell = maze.wallGrid[row * maze.cols + col];
+        if (cell.length) result.push(...cell);
+      }
+    }
+    return result;
   }
 
   private updateCat(delta: number, now: number): void {
@@ -3094,8 +3157,11 @@ export class MouseRace3D {
       fog.near = 18;
       fog.far = 52;
     }
-    const baseDist = 5.4;
-    const height = 3.0;
+    // On tall (portrait) screens, lift the camera and tilt it down a little so
+    // the mouse sits higher in the frame, clear of the bottom-center D-pad.
+    const portrait = this.camera.aspect < 0.9;
+    const baseDist = portrait ? 6.2 : 5.4;
+    const height = portrait ? 4.0 : 3.0;
     const sinH = Math.sin(this.cameraYaw);
     const cosH = Math.cos(this.cameraYaw);
 
@@ -3115,7 +3181,7 @@ export class MouseRace3D {
     const lookAhead = 1.6 + Math.abs(this.currentSpeed) * 0.18;
     const lookX = this.player.position.x - sinH * lookAhead;
     const lookZ = this.player.position.z - cosH * lookAhead;
-    this.camera.lookAt(lookX, this.player.position.y + 0.5, lookZ);
+    this.camera.lookAt(lookX, this.player.position.y + (portrait ? -0.2 : 0.5), lookZ);
 
     const targetFov = 52 + THREE.MathUtils.clamp(Math.abs(this.currentSpeed) * 0.6, 0, 6);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.08);
@@ -3132,18 +3198,18 @@ export class MouseRace3D {
   private clampCameraDistance(sinH: number, cosH: number, baseDist: number): number {
     if (!this.maze) return baseDist;
     const margin = 0.6;
-    let maxDist = baseDist;
-    for (const wall of this.maze.walls) {
-      for (let step = 0.4; step <= baseDist; step += 0.4) {
-        const x = this.player.position.x + sinH * step;
-        const z = this.player.position.z + cosH * step;
+    // March back along the camera ray and stop at the first wall the grid
+    // reports near each sample point, instead of testing every wall in the maze.
+    for (let step = 0.4; step <= baseDist; step += 0.4) {
+      const x = this.player.position.x + sinH * step;
+      const z = this.player.position.z + cosH * step;
+      for (const wall of this.nearbyWalls(x, z)) {
         if (x > wall.minX - margin && x < wall.maxX + margin && z > wall.minZ - margin && z < wall.maxZ + margin) {
-          maxDist = Math.min(maxDist, step - 0.3);
-          break;
+          return Math.max(2.6, step - 0.3);
         }
       }
     }
-    return Math.max(2.6, maxDist);
+    return Math.max(2.6, baseDist);
   }
 
   private spawnCelebration(center: THREE.Vector3): void {
@@ -3519,9 +3585,13 @@ export class MouseRace3D {
   }
 
   private updatePlaytestState(): void {
+    // Building and stringifying the full snapshot is only worth it when the
+    // debug panel is actually on screen; otherwise this ran every few frames
+    // for nothing. Agents can still pull state on demand via render_game_to_text.
+    if (!this.playtestVisible) {
+      return;
+    }
     this.playtest.state.textContent = JSON.stringify(this.getStateSnapshot(), null, 2);
-    (window as Window & { render_game_to_text?: () => string }).render_game_to_text = () =>
-      JSON.stringify(this.getStateSnapshot());
   }
 
   private resize = (): void => {

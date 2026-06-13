@@ -30,3 +30,5 @@
 - [x] Added visual "juice" (camera shake on damage, hover animations for pickups, waddle animations for characters)
 - [x] Kid-friendly pass: glowing compass arrow in Kid mode (points to next key/cheese), confetti celebration on level complete, short encouraging emoji messages, longer toast read time
 - [x] Simple control scheme (default): press the direction you want to go (camera-relative with yaw latching); touch uses a single 4-way D-pad; old tank controls kept as "Classic" via start-screen picker
+- [x] Performance pass: batch all maze walls into one merged mesh per material (hundreds of draw calls → ~2 per level); spatial wall grid so collision/camera checks scan only nearby cells; mobile pixel-ratio cap (1.5x) and smaller shadow map (1024) on touch devices; debug-state JSON only serialized when the playtest panel is visible; full geometry/material disposal on level unload
+- [x] Portrait fix: D-pad centered along the bottom and camera lifted on tall screens so touch controls no longer cover the mouse
