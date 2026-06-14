@@ -79,6 +79,7 @@ const CAT_RADIUS = 0.5;
 const SCOUT_PEEK_DURATION_MS = 12000;
 const SCOUT_CRUMBS_PER_CHARGE = 5;
 const MAX_SCOUT_PEEKS = 3;
+const GREEN_CRUMB_SKIP_EVERY = 3;
 const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
 const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
   easy: {
@@ -818,7 +819,9 @@ export class MouseRace3D {
 
         if (cell === ".") {
           crumbIndex += 1;
-          const isGuideCrumb = crumbIndex % DIFFICULTY_SETTINGS[this.difficulty].greenCrumbInterval === 0;
+          const greenCrumbInterval = DIFFICULTY_SETTINGS[this.difficulty].greenCrumbInterval;
+          const greenCrumbCandidateIndex = Math.floor(crumbIndex / greenCrumbInterval);
+          const isGuideCrumb = crumbIndex % greenCrumbInterval === 0 && greenCrumbCandidateIndex % GREEN_CRUMB_SKIP_EVERY !== 0;
           const crumbGeom = new THREE.IcosahedronGeometry(0.18, 0);
           const posAttr = crumbGeom.getAttribute("position") as THREE.BufferAttribute;
           for (let v = 0; v < posAttr.count; v += 1) {
