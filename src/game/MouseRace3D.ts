@@ -705,21 +705,57 @@ export class MouseRace3D {
       : undefined;
 
     // Wall meshes are batched: instead of one Object3D per cell (hundreds of
-    // draw calls), every wall block's geometry is translated into world space
-    // and merged into a single mesh per material set. The wallGrid lets
-    // collision/camera code look up only the rects near the player.
+    // draw calls), every wall block's faces are split into "side" and "top"
+    // geometry, translated into world space, and merged into two single-material
+    // meshes (mergeGeometries cannot preserve per-box multi-material groups, so
+    // we keep one material per merged mesh). The wallGrid lets collision/camera
+    // code look up only the rects near the player.
+    const sideMaterial = wallMaterials[0];
+    const topMaterial = wallMaterials[2];
     const wallY = wallHeight * 0.5 - 0.02;
-    const wallGeometries: THREE.BufferGeometry[] = [];
+    const sideGeometries: THREE.BufferGeometry[] = [];
+    const topGeometries: THREE.BufferGeometry[] = [];
     const tapeGeometries: THREE.BufferGeometry[] = [];
     const wallGrid: WallRect[][] = Array.from({ length: rows * cols }, () => []);
     const addWallRect = (row: number, col: number, rect: WallRect): void => {
       walls.push(rect);
       wallGrid[row * cols + col].push(rect);
     };
+    // BoxGeometry face groups: materialIndex 2 is the top (+Y); everything else
+    // is a side. Cache the index split per template box so each wall reuses it.
+    const splitCache = new Map<THREE.BoxGeometry, { side: number[]; top: number[] }>();
+    const splitFor = (base: THREE.BoxGeometry): { side: number[]; top: number[] } => {
+      const cached = splitCache.get(base);
+      if (cached) return cached;
+      const index = base.getIndex();
+      const side: number[] = [];
+      const top: number[] = [];
+      if (index) {
+        for (const group of base.groups) {
+          const target = group.materialIndex === 2 ? top : side;
+          for (let i = group.start; i < group.start + group.count; i += 1) {
+            target.push(index.getX(i));
+          }
+        }
+      }
+      const split = { side, top };
+      splitCache.set(base, split);
+      return split;
+    };
     const pushWallGeo = (base: THREE.BoxGeometry, x: number, z: number): void => {
-      const geo = base.clone();
-      geo.translate(x, wallY, z);
-      wallGeometries.push(geo);
+      const { side, top } = splitFor(base);
+      const sideGeo = base.clone();
+      sideGeo.clearGroups();
+      sideGeo.setIndex(side);
+      sideGeo.translate(x, wallY, z);
+      sideGeometries.push(sideGeo);
+      if (top.length) {
+        const topGeo = base.clone();
+        topGeo.clearGroups();
+        topGeo.setIndex(top);
+        topGeo.translate(x, wallY, z);
+        topGeometries.push(topGeo);
+      }
     };
     const pushTapeGeo = (x: number, z: number, sizeX: number, sizeZ: number): void => {
       const geo = new THREE.BoxGeometry(sizeX, 0.035, sizeZ);
@@ -947,17 +983,25 @@ export class MouseRace3D {
       });
     });
 
-    // Merge all wall blocks into a single multi-material mesh. BoxGeometry
-    // carries 6 face groups, so useGroups keeps the [side, side, top, ...]
-    // material array working across the whole merged batch.
-    if (wallGeometries.length) {
-      const merged = mergeGeometries(wallGeometries, true);
-      wallGeometries.forEach((geo) => geo.dispose());
+    // Merge the side faces and top faces into one single-material mesh each.
+    if (sideGeometries.length) {
+      const merged = mergeGeometries(sideGeometries, false);
+      sideGeometries.forEach((geo) => geo.dispose());
       if (merged) {
-        const wallMesh = new THREE.Mesh(merged, wallMaterials);
-        wallMesh.castShadow = true;
-        wallMesh.receiveShadow = true;
-        group.add(wallMesh);
+        const sideMesh = new THREE.Mesh(merged, sideMaterial);
+        sideMesh.castShadow = true;
+        sideMesh.receiveShadow = true;
+        group.add(sideMesh);
+      }
+    }
+    if (topGeometries.length) {
+      const mergedTop = mergeGeometries(topGeometries, false);
+      topGeometries.forEach((geo) => geo.dispose());
+      if (mergedTop) {
+        const topMesh = new THREE.Mesh(mergedTop, topMaterial);
+        topMesh.castShadow = true;
+        topMesh.receiveShadow = true;
+        group.add(topMesh);
       }
     }
     if (tapeMaterial && tapeGeometries.length) {
