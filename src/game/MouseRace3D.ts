@@ -6,11 +6,9 @@ import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
 const DIFFICULTY_KEY = "mouseRace.difficulty";
-const CONTROLS_KEY = "mouseRace.controls";
 
 type ControlKey = "up" | "down" | "left" | "right";
 type DifficultyKey = "easy" | "medium" | "hard";
-type ControlSchemeKey = "simple" | "classic";
 
 type DifficultySettings = {
   label: string;
@@ -184,10 +182,6 @@ export class MouseRace3D {
   private cameraInitialized = false;
   private catChasing = false;
   private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
-  private controlScheme: ControlSchemeKey = "simple";
-  private latchedMoveYaw = 0;
-  private lastSimpleInputKey = "";
-  private readonly simpleMoveDir = new THREE.Vector3();
   private scoutPins: ScoutPin[] = [];
 
   private bgMusic: HTMLAudioElement;
@@ -203,8 +197,6 @@ export class MouseRace3D {
   };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
-  private cheeseCompass!: THREE.Group;
-  private compassMaterial!: THREE.MeshBasicMaterial;
 
   private readonly hud = {
     root: this.must<HTMLDivElement>("hud"),
@@ -327,14 +319,11 @@ export class MouseRace3D {
     this.player = this.buildMouse();
     this.cat = this.buildCat();
     this.cheese = this.buildCheese();
-    this.cheeseCompass = this.buildCompassArrow();
-
-    this.scene.add(this.player, this.cat, this.cheese, this.cheeseCompass);
+    this.scene.add(this.player, this.cat, this.cheese);
   }
 
   private bindUi(): void {
     this.bindDifficultyPicker();
-    this.bindControlsPicker();
     this.bindMazePicker();
 
     this.must<HTMLButtonElement>("start-btn").addEventListener("click", () => {
@@ -482,33 +471,6 @@ export class MouseRace3D {
     }
   }
 
-  private bindControlsPicker(): void {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-controls]"));
-    const saved = localStorage.getItem(CONTROLS_KEY);
-    const setScheme = (scheme: ControlSchemeKey, persist = true): void => {
-      this.controlScheme = scheme;
-      if (persist) {
-        localStorage.setItem(CONTROLS_KEY, scheme);
-      }
-      this.touchControls.classList.toggle("scheme-simple", scheme === "simple");
-      buttons.forEach((button) => {
-        const isActive = button.dataset.controls === scheme;
-        button.classList.toggle("active", isActive);
-        button.setAttribute("aria-pressed", String(isActive));
-      });
-    };
-
-    buttons.forEach((button) => {
-      const scheme = button.dataset.controls;
-      if (scheme !== "simple" && scheme !== "classic") {
-        return;
-      }
-      button.addEventListener("click", () => setScheme(scheme));
-    });
-
-    setScheme(saved === "classic" ? "classic" : "simple", false);
-  }
-
   private bindMazePicker(): void {
     const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-maze]"));
     const setMaze = (index: number): void => {
@@ -645,8 +607,6 @@ export class MouseRace3D {
     this.pitchAngle = 0;
     this.footstepAccum = 0;
     this.catChasing = false;
-    this.latchedMoveYaw = this.playerHeading;
-    this.lastSimpleInputKey = "";
     this.hud.vignette.classList.remove("active");
     this.updateTheme(LEVELS[index]);
     this.rebuildScoutPins();
@@ -1363,65 +1323,6 @@ export class MouseRace3D {
     group.add(this.createWorldMarker("CHEESE", 0xfff1a7, 0x7f4a00, 2.85));
 
     return group;
-  }
-
-  private buildCompassArrow(): THREE.Group {
-    const group = new THREE.Group();
-    this.compassMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffd84a,
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false,
-    });
-
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 12), this.compassMaterial);
-    head.rotation.x = -Math.PI / 2;
-    head.position.z = -0.36;
-    group.add(head);
-
-    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.36, 10), this.compassMaterial);
-    tail.rotation.x = Math.PI / 2;
-    tail.position.z = -0.02;
-    group.add(tail);
-
-    group.visible = false;
-    return group;
-  }
-
-  private updateCheeseCompass(now: number): void {
-    if (
-      !this.maze ||
-      this.difficulty !== "easy" ||
-      this.isScoutPeekActive() ||
-      this.isOverlayOpen() ||
-      this.paused
-    ) {
-      this.cheeseCompass.visible = false;
-      return;
-    }
-
-    const needsKey = this.remainingRequiredCheeseKeys() > 0;
-    const target = needsKey ? this.getNearestActiveCheeseKey()?.position : this.cheese.position;
-    if (!target) {
-      this.cheeseCompass.visible = false;
-      return;
-    }
-
-    const dx = target.x - this.player.position.x;
-    const dz = target.z - this.player.position.z;
-    if (Math.hypot(dx, dz) < 2.4) {
-      this.cheeseCompass.visible = false;
-      return;
-    }
-
-    this.cheeseCompass.visible = true;
-    this.compassMaterial.color.setHex(needsKey ? 0xb879ff : 0xffd84a);
-    this.cheeseCompass.position.set(
-      this.player.position.x,
-      this.player.position.y + 1.5 + Math.sin(now * 0.004) * 0.09,
-      this.player.position.z,
-    );
-    this.cheeseCompass.rotation.y = Math.atan2(-dx, -dz);
   }
 
   private buildGem(accentColor: number): THREE.Group {
@@ -2329,8 +2230,6 @@ export class MouseRace3D {
     this.updateScoutPins();
     this.animateMouse(now);
     this.updatePlayerLight();
-    this.updateCheeseCompass(now);
-
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
       this.updatePlaytestState();
@@ -2413,11 +2312,6 @@ export class MouseRace3D {
   }
 
   private updatePlayer(delta: number, now: number): void {
-    if (this.controlScheme === "simple") {
-      this.updatePlayerSimple(delta, now);
-      return;
-    }
-
     const turnInput = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
     const forwardInput = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
 
@@ -2461,78 +2355,6 @@ export class MouseRace3D {
     const moving = Math.abs(this.currentSpeed) > 0.2;
     const bob = moving ? Math.sin(now * 0.018) * 0.05 * Math.abs(speedFraction) : 0;
     const waddle = moving ? Math.sin(now * 0.015) * 0.08 * Math.abs(speedFraction) : 0;
-    this.player.rotation.set(this.pitchAngle, this.playerHeading, this.bankAngle + waddle);
-    this.player.position.y = 0.3 + bob;
-  }
-
-  // Simple scheme: each press moves the mouse in that screen direction. The
-  // camera yaw is latched when the pressed combination changes so the travel
-  // direction stays fixed while the camera swings behind the mouse.
-  private updatePlayerSimple(delta: number, now: number): void {
-    const rightInput = (this.controls.right ? 1 : 0) - (this.controls.left ? 1 : 0);
-    const forwardInput = (this.controls.up ? 1 : 0) - (this.controls.down ? 1 : 0);
-    const hasInput = rightInput !== 0 || forwardInput !== 0;
-    const inputKey = hasInput ? `${rightInput},${forwardInput}` : "";
-
-    if (hasInput && inputKey !== this.lastSimpleInputKey) {
-      this.latchedMoveYaw = this.cameraYaw;
-    }
-    this.lastSimpleInputKey = inputKey;
-
-    if (hasInput) {
-      const sinY = Math.sin(this.latchedMoveYaw);
-      const cosY = Math.cos(this.latchedMoveYaw);
-      this.simpleMoveDir
-        .set(-sinY * forwardInput + cosY * rightInput, 0, -cosY * forwardInput - sinY * rightInput)
-        .normalize();
-    }
-
-    this.targetSpeed = hasInput ? this.moveSpeed : 0;
-    const accelRate = hasInput ? this.accel : this.decel;
-    this.currentSpeed = THREE.MathUtils.lerp(
-      this.currentSpeed,
-      this.targetSpeed,
-      Math.min(1, delta * accelRate * 0.18),
-    );
-    if (Math.abs(this.currentSpeed) < 0.01) this.currentSpeed = 0;
-
-    if (this.currentSpeed > 0) {
-      this.playerVelocity.copy(this.simpleMoveDir).multiplyScalar(this.currentSpeed * delta);
-      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
-      if (this.currentSpeed > 0.4) {
-        this.footstepAccum += this.currentSpeed * delta;
-        if (this.footstepAccum >= 0.45) {
-          this.footstepAccum = 0;
-          this.audio.tickFootstep();
-        }
-      } else {
-        this.footstepAccum = 0;
-      }
-    } else {
-      this.footstepAccum = 0;
-    }
-
-    if (hasInput) {
-      const targetHeading = Math.atan2(-this.simpleMoveDir.x, -this.simpleMoveDir.z);
-      const headingDiff = Math.atan2(
-        Math.sin(targetHeading - this.playerHeading),
-        Math.cos(targetHeading - this.playerHeading),
-      );
-      this.playerHeading += headingDiff * Math.min(1, delta * 10);
-      this.turnRate = THREE.MathUtils.clamp(headingDiff * 2.2, -2.4, 2.4);
-    } else {
-      this.turnRate = THREE.MathUtils.lerp(this.turnRate, 0, Math.min(1, delta * 8));
-    }
-
-    const targetBank = THREE.MathUtils.clamp(-this.turnRate * 0.25, -0.35, 0.35);
-    this.bankAngle = THREE.MathUtils.lerp(this.bankAngle, targetBank, Math.min(1, delta * 8));
-    const speedFraction = this.currentSpeed / this.moveSpeed;
-    const targetPitch = THREE.MathUtils.clamp(speedFraction * 0.18, -0.18, 0.18);
-    this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, targetPitch, Math.min(1, delta * 6));
-
-    const moving = this.currentSpeed > 0.2;
-    const bob = moving ? Math.sin(now * 0.018) * 0.05 * speedFraction : 0;
-    const waddle = moving ? Math.sin(now * 0.015) * 0.08 * speedFraction : 0;
     this.player.rotation.set(this.pitchAngle, this.playerHeading, this.bankAngle + waddle);
     this.player.position.y = 0.3 + bob;
   }
@@ -3177,7 +2999,7 @@ export class MouseRace3D {
       .sort((a, b) => a.position.distanceToSquared(this.player.position) - b.position.distanceToSquared(this.player.position))[0];
   }
 
-  private updateCamera(delta: number): void {
+  private updateCamera(_delta: number): void {
     if (this.isScoutPeekActive()) {
       this.updateScoutCamera();
       return;
@@ -3188,15 +3010,7 @@ export class MouseRace3D {
       this.wasScoutPeekActive = false;
     }
 
-    if (this.controlScheme === "simple" && this.cameraInitialized) {
-      const yawDiff = Math.atan2(
-        Math.sin(this.playerHeading - this.cameraYaw),
-        Math.cos(this.playerHeading - this.cameraYaw),
-      );
-      this.cameraYaw += yawDiff * Math.min(1, delta * 3);
-    } else {
-      this.cameraYaw = this.playerHeading;
-    }
+    this.cameraYaw = this.playerHeading;
     this.camera.up.set(0, 1, 0);
     this.camera.far = 300;
     const fog = this.scene.fog;
@@ -3425,7 +3239,7 @@ export class MouseRace3D {
 
   private getIntroBody(): string {
     if (this.difficulty === "easy") {
-      return "Beat Baby Alice to the cheese! 🧀 The glowing arrow shows you the way. Munch crumbs for extra lives, grab the key 🔑, and watch out for the cat! 🐱";
+      return "Beat Baby Alice to the cheese! 🧀 Follow green crumbs for help, munch crumbs for extra lives, grab the key 🔑, and watch out for the cat! 🐱";
     }
 
     if (this.difficulty === "medium") {
@@ -3466,8 +3280,6 @@ export class MouseRace3D {
     this.bankAngle = 0;
     this.pitchAngle = 0;
     this.footstepAccum = 0;
-    this.latchedMoveYaw = this.playerHeading;
-    this.lastSimpleInputKey = "";
     this.player.position.y = 0.3;
     this.updatePlaytestState();
   }
@@ -3583,7 +3395,7 @@ export class MouseRace3D {
       title: level?.title ?? "n/a",
       difficulty: this.difficulty,
       difficultyLabel: DIFFICULTY_SETTINGS[this.difficulty].label,
-      controlScheme: this.controlScheme,
+      controlScheme: "classic",
       aliceTimeMs: level ? this.getAliceTimeMs(level) : 0,
       catSpeed: level ? this.getCatSpeed(level) : 0,
       lives: this.lives,

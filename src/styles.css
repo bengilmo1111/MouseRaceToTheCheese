@@ -694,10 +694,10 @@ kbd {
 }
 
 .touch-btn {
-  width: clamp(68px, 18vw, 92px);
-  height: clamp(62px, 15vw, 78px);
-  min-width: 64px;
-  min-height: 58px;
+  width: clamp(75px, 19.8vw, 101px);
+  height: clamp(68px, 16.5vw, 86px);
+  min-width: 70px;
+  min-height: 64px;
   border: 3px solid rgba(255, 250, 238, 0.42);
   border-radius: 24px;
   background: radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.16), transparent 35%), rgba(61, 41, 14, 0.72);
@@ -715,12 +715,12 @@ kbd {
 }
 
 .touch-btn.arrow {
-  font-size: clamp(24px, 6.2vw, 34px);
+  font-size: clamp(26px, 6.8vw, 37px);
   line-height: 1;
 }
 
 .touch-btn-primary {
-  height: clamp(78px, 20vw, 106px);
+  height: clamp(86px, 22vw, 117px);
   background: radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 35%), rgba(81, 53, 19, 0.78);
 }
 
@@ -733,24 +733,8 @@ kbd {
   box-shadow: 0 6px 14px rgba(28, 18, 7, 0.22), inset 0 0 0 2px rgba(255, 255, 255, 0.16);
 }
 
-/* Simple scheme shows a single 4-way D-pad; Classic shows steer + drive pads.
-   In portrait it's centered along the bottom so it never overlaps the mouse
-   (which sits low-center); landscape pins it to the left for the thumb. */
+/* Classic touch controls use separate steering and drive pads. */
 .touch-pad-dpad {
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-#touch-controls .touch-pad-dpad {
-  display: none;
-}
-
-#touch-controls.scheme-simple .touch-pad-dpad {
-  display: grid;
-}
-
-#touch-controls.scheme-simple .touch-pad-steer,
-#touch-controls.scheme-simple .touch-pad-drive {
   display: none;
 }
 
@@ -1118,19 +1102,19 @@ kbd {
   }
 
   .touch-btn {
-    width: clamp(52px, 10vw, 66px);
-    height: clamp(44px, 10vh, 58px);
-    min-width: 48px;
-    min-height: 42px;
+    width: clamp(57px, 11vw, 73px);
+    height: clamp(48px, 11vh, 64px);
+    min-width: 53px;
+    min-height: 46px;
     border-radius: 16px;
   }
 
   .touch-btn.arrow {
-    font-size: clamp(20px, 4.5vw, 28px);
+    font-size: clamp(22px, 5vw, 31px);
   }
 
   .touch-btn-primary {
-    height: clamp(56px, 13vh, 72px);
+    height: clamp(62px, 14.3vh, 79px);
   }
 
   .touch-row {
