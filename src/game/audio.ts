@@ -143,6 +143,12 @@ export class AudioBus {
     this.tone("triangle", 180, 70, 0.14, 0.32, 0.002, 0.01);
   }
 
+  playNoisyTile(): void {
+    this.noise(0.09, 0.16, 3200, 0.001, 0.01);
+    this.tone("triangle", 880, 1180, 0.08, 0.16, 0.002, 0.012);
+    this.tone("sine", 1320, 940, 0.12, 0.1, 0.004, 0.018);
+  }
+
   playHazard(): void {
     this.tone("sawtooth", 160, 60, 0.35, 0.32, 0.005, 0.04);
   }

@@ -43,6 +43,12 @@ type MazeHazard = {
   kind: "trap" | "lava" | "water";
 };
 
+type MazeNoisyTile = {
+  mesh: THREE.Object3D;
+  position: THREE.Vector3;
+  lastTriggeredMs: number;
+};
+
 type MazeState = {
   map: string[];
   originX: number;
@@ -54,6 +60,7 @@ type MazeState = {
   crumbs: MazePickup[];
   traps: MazeHazard[];
   trapGlows: THREE.Mesh[];
+  noisyTiles: MazeNoisyTile[];
   gems: MazePickup[];
   cheeseKeys: MazePickup[];
   patrol: THREE.Vector3[];
@@ -78,6 +85,8 @@ const SCOUT_PEEK_DURATION_MS = 12000;
 const SCOUT_CRUMBS_PER_CHARGE = 5;
 const MAX_SCOUT_PEEKS = 3;
 const GREEN_CRUMB_SKIP_EVERY = 3;
+const NOISY_TILE_COOLDOWN_MS = 2600;
+const CAT_INVESTIGATE_DURATION_MS = 5200;
 const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
 const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
   easy: {
@@ -181,6 +190,8 @@ export class MouseRace3D {
   private cameraYaw = 0;
   private cameraInitialized = false;
   private catChasing = false;
+  private catInvestigateTarget?: THREE.Vector3;
+  private catInvestigateUntil = 0;
   private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
   private scoutPins: ScoutPin[] = [];
 
@@ -607,6 +618,8 @@ export class MouseRace3D {
     this.pitchAngle = 0;
     this.footstepAccum = 0;
     this.catChasing = false;
+    this.catInvestigateTarget = undefined;
+    this.catInvestigateUntil = 0;
     this.hud.vignette.classList.remove("active");
     this.updateTheme(LEVELS[index]);
     this.rebuildScoutPins();
@@ -619,6 +632,7 @@ export class MouseRace3D {
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
     const trapGlows: THREE.Mesh[] = [];
+    const noisyTiles: MazeNoisyTile[] = [];
     const gems: MazePickup[] = [];
     const cheeseKeys: MazePickup[] = [];
     const patrol: THREE.Vector3[] = [];
@@ -901,6 +915,15 @@ export class MouseRace3D {
           return;
         }
 
+        if (cell === "N") {
+          const noisyTile = this.buildNoisyTile(level);
+          noisyTile.position.set(x, 0.035, z);
+          noisyTile.rotation.y = ((row + col) % 4) * (Math.PI / 2);
+          group.add(noisyTile);
+          noisyTiles.push({ mesh: noisyTile, position: noisyTile.position.clone(), lastTriggeredMs: -Infinity });
+          return;
+        }
+
         if (cell === "G") {
           const gem = this.buildGem(level.theme.accent);
           gem.position.set(x, 0.6, z);
@@ -995,6 +1018,7 @@ export class MouseRace3D {
       crumbs,
       traps,
       trapGlows,
+      noisyTiles,
       gems,
       cheeseKeys,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
@@ -1506,6 +1530,88 @@ export class MouseRace3D {
     const catchPin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.16), metalDarkMat);
     catchPin.position.set(0, 0.155, 0.36);
     group.add(catchPin);
+
+    return group;
+  }
+
+  private buildNoisyTile(level: LevelDefinition): THREE.Group {
+    const group = new THREE.Group();
+    const base = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 1.0, 36),
+      new THREE.MeshBasicMaterial({
+        color: level.theme.accent,
+        transparent: true,
+        opacity: 0.32,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    base.rotation.x = -Math.PI / 2;
+    group.add(base);
+
+    const marker = new THREE.Mesh(
+      new THREE.CircleGeometry(0.44, 28),
+      new THREE.MeshBasicMaterial({
+        color: level.theme.trim,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    marker.rotation.x = -Math.PI / 2;
+    marker.position.y = 0.01;
+    group.add(marker);
+
+    if (level.theme.wallStyle === "bamboo") {
+      const leafMat = new THREE.MeshStandardMaterial({ color: 0xc4822d, roughness: 0.9, side: THREE.DoubleSide });
+      for (let i = 0; i < 7; i += 1) {
+        const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.46), leafMat);
+        const angle = (i / 7) * Math.PI * 2;
+        leaf.position.set(Math.cos(angle) * (0.16 + (i % 3) * 0.12), 0.045, Math.sin(angle) * (0.16 + (i % 2) * 0.14));
+        leaf.rotation.set(-Math.PI / 2, 0, angle + Math.PI * 0.18);
+        leaf.castShadow = true;
+        group.add(leaf);
+      }
+      group.add(this.createWorldMarker("CRUNCH", 0xffb45a, level.theme.trim, 1.15));
+    } else if (level.theme.wallStyle === "metal") {
+      const boardMat = new THREE.MeshStandardMaterial({
+        color: 0x69d8ff,
+        emissive: 0x0088cc,
+        emissiveIntensity: 0.28,
+        roughness: 0.25,
+        metalness: 0.5,
+      });
+      for (let i = -1; i <= 1; i += 1) {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 1.18), boardMat);
+        board.position.set(i * 0.28, 0.055, 0);
+        board.rotation.z = i * 0.035;
+        board.castShadow = true;
+        group.add(board);
+      }
+      group.add(this.createWorldMarker("SQUEAK", level.theme.accent, 0x06263a, 1.15));
+    } else {
+      const bellMat = new THREE.MeshStandardMaterial({
+        color: 0xffd75a,
+        emissive: 0xffb000,
+        emissiveIntensity: 0.25,
+        roughness: 0.42,
+        metalness: 0.28,
+      });
+      const clapperMat = new THREE.MeshStandardMaterial({ color: 0x8a5a16, roughness: 0.5 });
+      for (const offset of [-0.32, 0, 0.32]) {
+        const bell = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.72), bellMat);
+        bell.scale.set(1, 0.75, 1);
+        bell.position.set(offset, 0.14, Math.abs(offset) * 0.45);
+        bell.rotation.z = offset * 0.5;
+        bell.castShadow = true;
+        group.add(bell);
+        const clapper = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), clapperMat);
+        clapper.position.set(offset, 0.055, Math.abs(offset) * 0.45);
+        group.add(clapper);
+      }
+      group.add(this.createWorldMarker("JINGLE", 0xffdf66, level.theme.trim, 1.15));
+    }
 
     return group;
   }
@@ -2426,13 +2532,18 @@ export class MouseRace3D {
     if (patrol.length === 0) {
       return;
     }
+    if (this.catInvestigateTarget && now >= this.catInvestigateUntil) {
+      this.catInvestigateTarget = undefined;
+      this.catInvestigateUntil = 0;
+    }
 
     const playerVector = this._tmpVec.copy(this.player.position).sub(this.cat.position);
     playerVector.y = 0;
     const playerDistance = playerVector.length();
     const baseChaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
     const chaseRange = baseChaseRange * DIFFICULTY_SETTINGS[this.difficulty].chaseRangeMultiplier;
-    const shouldChase = playerDistance < chaseRange;
+    const investigating = !!this.catInvestigateTarget && now < this.catInvestigateUntil;
+    const shouldChase = playerDistance < chaseRange && !investigating;
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
@@ -2442,17 +2553,23 @@ export class MouseRace3D {
       this.hud.vignette.classList.toggle("active", shouldChase);
     }
 
-    const target = shouldChase ? this.player.position : patrol[this.catPatrolIndex];
+    const target = shouldChase ? this.player.position : this.catInvestigateTarget ?? patrol[this.catPatrolIndex];
     const vector = this._tmpVec.copy(target).sub(this.cat.position);
     vector.y = 0;
     const distance = vector.length();
 
-    if (!shouldChase && distance < 0.15) {
+    if (!shouldChase && investigating && distance < 0.3) {
+      this.catInvestigateTarget = undefined;
+      this.catInvestigateUntil = 0;
+      return;
+    }
+
+    if (!shouldChase && !investigating && distance < 0.15) {
       this.catPatrolIndex = (this.catPatrolIndex + 1) % patrol.length;
       return;
     }
 
-    const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : 0.85;
+    const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : investigating ? 0.98 : 0.85;
     vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
@@ -2501,6 +2618,21 @@ export class MouseRace3D {
           : trap.kind === "water" ? "You sank into a water trap!"
           : "A mousetrap snapped shut!";
         this.triggerHazard(msg);
+      }
+    }
+
+    for (const noisyTile of this.maze.noisyTiles) {
+      noisyTile.mesh.rotation.z = Math.sin(now * 0.004 + noisyTile.position.x) * 0.035;
+      if (
+        now - noisyTile.lastTriggeredMs > NOISY_TILE_COOLDOWN_MS &&
+        this.player.position.distanceToSquared(noisyTile.position) < 0.9 * 0.9
+      ) {
+        noisyTile.lastTriggeredMs = now;
+        this.catInvestigateTarget = noisyTile.position.clone();
+        this.catInvestigateUntil = now + CAT_INVESTIGATE_DURATION_MS;
+        this.audio.playNoisyTile();
+        this.flashHint("🔔 Oops, noisy floor! The cat is coming to check!", true);
+        this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.08);
       }
     }
 
@@ -3269,6 +3401,8 @@ export class MouseRace3D {
     this.gemCooldownUntil = 0;
     this.cheeseLockHintUntil = 0;
     this.catChasing = false;
+    this.catInvestigateTarget = undefined;
+    this.catInvestigateUntil = 0;
     this.hud.vignette.classList.remove("active");
     this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
     this.cameraYaw = this.playerHeading;
