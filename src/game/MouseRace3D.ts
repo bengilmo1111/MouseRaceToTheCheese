@@ -40,7 +40,16 @@ type MazePickup = {
 type MazeHazard = {
   mesh: THREE.Object3D;
   position: THREE.Vector3;
+  row: number;
+  col: number;
   kind: "trap" | "lava" | "water";
+};
+
+type MazeBlock = {
+  mesh: THREE.Object3D;
+  row: number;
+  col: number;
+  position: THREE.Vector3;
 };
 
 type MazeState = {
@@ -54,6 +63,7 @@ type MazeState = {
   crumbs: MazePickup[];
   traps: MazeHazard[];
   trapGlows: THREE.Mesh[];
+  blocks: MazeBlock[];
   gems: MazePickup[];
   mouseHoles: MazePickup[];
   cheeseKeys: MazePickup[];
@@ -621,6 +631,7 @@ export class MouseRace3D {
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
     const trapGlows: THREE.Mesh[] = [];
+    const blocks: MazeBlock[] = [];
     const gems: MazePickup[] = [];
     const mouseHoles: MazePickup[] = [];
     const cheeseKeys: MazePickup[] = [];
@@ -831,7 +842,7 @@ export class MouseRace3D {
           trap.position.set(x, 0.05, z);
           trap.rotation.y = Math.random() * Math.PI;
           group.add(trap);
-          traps.push({ mesh: trap, position: trap.position.clone(), kind: "trap" });
+          traps.push({ mesh: trap, position: trap.position.clone(), row, col, kind: "trap" });
 
           const glow = new THREE.Mesh(
             new THREE.RingGeometry(0.55, 0.95, 32),
@@ -856,7 +867,7 @@ export class MouseRace3D {
             const voidTile = this.buildVoidRift();
             voidTile.position.set(x, 0.01, z);
             group.add(voidTile);
-            traps.push({ mesh: voidTile, position: voidTile.position.clone(), kind: "lava" });
+            traps.push({ mesh: voidTile, position: voidTile.position.clone(), row, col, kind: "lava" });
             const glow = new THREE.Mesh(
               new THREE.RingGeometry(0.28, 0.58, 32),
               new THREE.MeshBasicMaterial({ color: 0x8800ff, transparent: true, opacity: 0.65, side: THREE.DoubleSide, depthWrite: false }),
@@ -870,7 +881,7 @@ export class MouseRace3D {
             const lavaTile = this.buildLavaPit();
             lavaTile.position.set(x, 0.01, z);
             group.add(lavaTile);
-            traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), kind: "lava" });
+            traps.push({ mesh: lavaTile, position: lavaTile.position.clone(), row, col, kind: "lava" });
             const glow = new THREE.Mesh(
               new THREE.RingGeometry(0.32, 0.52, 32),
               new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
@@ -888,7 +899,7 @@ export class MouseRace3D {
           const waterTile = this.buildWaterTrap();
           waterTile.position.set(x, 0.01, z);
           group.add(waterTile);
-          traps.push({ mesh: waterTile, position: waterTile.position.clone(), kind: "water" });
+          traps.push({ mesh: waterTile, position: waterTile.position.clone(), row, col, kind: "water" });
           for (let ri = 0; ri < 3; ri += 1) {
             const inner = 0.18 + ri * 0.14;
             const ripple = new THREE.Mesh(
@@ -901,6 +912,15 @@ export class MouseRace3D {
             group.add(ripple);
             trapGlows.push(ripple);
           }
+          return;
+        }
+
+
+        if (cell === "B") {
+          const block = this.buildCheeseBlock();
+          block.position.set(x, 0.46, z);
+          group.add(block);
+          blocks.push({ mesh: block, row, col, position: block.position.clone() });
           return;
         }
 
@@ -1010,6 +1030,7 @@ export class MouseRace3D {
       crumbs,
       traps,
       trapGlows,
+      blocks,
       gems,
       mouseHoles,
       cheeseKeys,
@@ -1338,6 +1359,44 @@ export class MouseRace3D {
     group.add(goalRing);
     group.add(this.createWorldMarker("CHEESE", 0xfff1a7, 0x7f4a00, 2.85));
 
+    return group;
+  }
+
+  private buildCheeseBlock(): THREE.Group {
+    const group = new THREE.Group();
+    const blockMat = new THREE.MeshStandardMaterial({
+      color: 0xffcf4a,
+      roughness: 0.58,
+      emissive: 0xd99017,
+      emissiveIntensity: 0.1,
+    });
+    const rindMat = new THREE.MeshStandardMaterial({ color: 0xd88b1e, roughness: 0.78 });
+    const holeMat = new THREE.MeshStandardMaterial({ color: 0xb77313, roughness: 0.9 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.92, 1.38), blockMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.1, 1.42), rindMat);
+    cap.position.y = 0.51;
+    cap.castShadow = true;
+    group.add(cap);
+
+    const holes = [
+      [-0.48, 0.12, -0.7, 0.12],
+      [0.3, -0.2, -0.7, 0.1],
+      [0.7, 0.06, 0.42, 0.11],
+      [-0.7, -0.14, 0.26, 0.09],
+    ];
+    for (const [x, y, z, radius] of holes) {
+      const hole = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 8), holeMat);
+      hole.position.set(x, y, z);
+      hole.scale.z = 0.32;
+      group.add(hole);
+    }
+
+    group.add(this.createWorldMarker("PUSH", 0xfff3a1, 0x7f4a00, 1.15));
     return group;
   }
 
@@ -2322,7 +2381,7 @@ export class MouseRace3D {
       const dx = -Math.sin(this.playerHeading) * sign * 0.7;
       const dz = -Math.cos(this.playerHeading) * sign * 0.7;
       this.movementDelta.set(dx, 0, dz);
-      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.movementDelta);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.movementDelta, true);
     }
 
     this.player.rotation.y = this.playerHeading;
@@ -2402,7 +2461,7 @@ export class MouseRace3D {
       const forwardX = -Math.sin(this.playerHeading);
       const forwardZ = -Math.cos(this.playerHeading);
       this.playerVelocity.set(forwardX * this.currentSpeed * delta, 0, forwardZ * this.currentSpeed * delta);
-      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity);
+      this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this.playerVelocity, true);
       if (Math.abs(this.currentSpeed) > 0.4) {
         this.footstepAccum += Math.abs(this.currentSpeed) * delta;
         if (this.footstepAccum >= 0.45) {
@@ -2438,38 +2497,93 @@ export class MouseRace3D {
     return Math.atan2(-dx, -dz);
   }
 
-  private moveWithCollisions(position: THREE.Vector3, radius: number, delta: THREE.Vector3): void {
+  private moveWithCollisions(position: THREE.Vector3, radius: number, delta: THREE.Vector3, canPushBlocks = false): void {
     position.x += delta.x;
-    this.resolveAxis(position, radius, "x");
+    this.resolveAxis(position, radius, "x", delta.x, canPushBlocks);
     position.z += delta.z;
-    this.resolveAxis(position, radius, "z");
+    this.resolveAxis(position, radius, "z", delta.z, canPushBlocks);
   }
 
-  private resolveAxis(position: THREE.Vector3, radius: number, axis: "x" | "z"): void {
-    for (const wall of this.nearbyWalls(position.x, position.z)) {
-      if (
-        position.x + radius <= wall.minX ||
-        position.x - radius >= wall.maxX ||
-        position.z + radius <= wall.minZ ||
-        position.z - radius >= wall.maxZ
-      ) {
+  private resolveAxis(position: THREE.Vector3, radius: number, axis: "x" | "z", axisDelta: number, canPushBlocks: boolean): void {
+    for (const block of this.maze.blocks) {
+      const rect = this.blockRect(block);
+      if (!this.overlapsRect(position, radius, rect)) {
         continue;
       }
 
-      if (axis === "x") {
-        if (position.x < (wall.minX + wall.maxX) * 0.5) {
-          position.x = wall.minX - radius;
-        } else {
-          position.x = wall.maxX + radius;
-        }
-      } else {
-        if (position.z < (wall.minZ + wall.maxZ) * 0.5) {
-          position.z = wall.minZ - radius;
-        } else {
-          position.z = wall.maxZ + radius;
-        }
+      const pushDirection = axisDelta === 0 ? 0 : Math.sign(axisDelta);
+      if (canPushBlocks && pushDirection !== 0 && this.tryPushBlock(block, axis, pushDirection)) {
+        continue;
       }
+
+      this.pushOutOfRect(position, radius, rect, axis);
     }
+
+    for (const wall of this.nearbyWalls(position.x, position.z)) {
+      if (!this.overlapsRect(position, radius, wall)) {
+        continue;
+      }
+
+      this.pushOutOfRect(position, radius, wall, axis);
+    }
+  }
+
+  private overlapsRect(position: THREE.Vector3, radius: number, rect: WallRect): boolean {
+    return !(
+      position.x + radius <= rect.minX ||
+      position.x - radius >= rect.maxX ||
+      position.z + radius <= rect.minZ ||
+      position.z - radius >= rect.maxZ
+    );
+  }
+
+  private pushOutOfRect(position: THREE.Vector3, radius: number, rect: WallRect, axis: "x" | "z"): void {
+    if (axis === "x") {
+      position.x = position.x < (rect.minX + rect.maxX) * 0.5 ? rect.minX - radius : rect.maxX + radius;
+    } else {
+      position.z = position.z < (rect.minZ + rect.maxZ) * 0.5 ? rect.minZ - radius : rect.maxZ + radius;
+    }
+  }
+
+  private blockRect(block: MazeBlock): WallRect {
+    const halfSize = this.tileSize * 0.4;
+    return {
+      minX: block.position.x - halfSize,
+      maxX: block.position.x + halfSize,
+      minZ: block.position.z - halfSize,
+      maxZ: block.position.z + halfSize,
+    };
+  }
+
+  private tryPushBlock(block: MazeBlock, axis: "x" | "z", direction: number): boolean {
+    const nextRow = block.row + (axis === "z" ? direction : 0);
+    const nextCol = block.col + (axis === "x" ? direction : 0);
+    if (!this.canBlockOccupy(nextRow, nextCol)) {
+      return false;
+    }
+
+    block.row = nextRow;
+    block.col = nextCol;
+    block.position.copy(this.cellCenter(nextRow, nextCol, 0.46));
+    block.mesh.position.copy(block.position);
+    return true;
+  }
+
+  private canBlockOccupy(row: number, col: number): boolean {
+    if (row < 0 || row >= this.maze.rows || col < 0 || col >= this.maze.cols) {
+      return false;
+    }
+
+    const cell = this.maze.map[row]?.[col];
+    if (!cell || cell === "#" || cell === "T") {
+      return false;
+    }
+
+    return !this.maze.blocks.some((block) => block.row === row && block.col === col);
+  }
+
+  private isHazardNeutralized(hazard: MazeHazard): boolean {
+    return this.maze.blocks.some((block) => block.row === hazard.row && block.col === hazard.col);
   }
 
   // Gather wall rects from the 3x3 cell block around a world position. A wall
@@ -2565,6 +2679,7 @@ export class MouseRace3D {
     }
 
     for (const trap of this.maze.traps) {
+      if (this.isHazardNeutralized(trap)) continue;
       if (this.player.position.distanceToSquared(trap.position) < 0.75 * 0.75) {
         this.audio.playTrap();
         const msg = trap.kind === "lava" ? "You fell into a lava pit!"
