@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { LEVELS, LevelDefinition, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
+import { LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
@@ -19,6 +19,7 @@ type DifficultySettings = {
   extraLifeCrumbs: number;
   greenCrumbInterval: number;
   gateCycleMs: number;
+  movingHazardSpeedMultiplier: number;
   requiredKeyLimit?: number;
   forgivingHits: boolean;
 };
@@ -43,7 +44,15 @@ type MazeHazard = {
   position: THREE.Vector3;
   row: number;
   col: number;
-  kind: "trap" | "lava" | "water";
+  kind: "trap" | "lava" | "water" | "moving";
+};
+
+type MazeMovingHazard = MazeHazard & {
+  anchorPosition: THREE.Vector3;
+  movementAxis: "x" | "z";
+  travelDistance: number;
+  speed: number;
+  currentPhase: number;
 };
 
 type MazeNoisyTile = {
@@ -92,6 +101,7 @@ type MazeState = {
   wallGrid: WallRect[][];
   crumbs: MazePickup[];
   traps: MazeHazard[];
+  movingHazards: MazeMovingHazard[];
   trapGlows: THREE.Mesh[];
   noisyTiles: MazeNoisyTile[];
   doors: MazeDoor[];
@@ -136,6 +146,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     extraLifeCrumbs: 2,
     greenCrumbInterval: 4,
     gateCycleMs: 5200,
+    movingHazardSpeedMultiplier: 0.55,
     requiredKeyLimit: 1,
     forgivingHits: true,
   },
@@ -148,6 +159,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     extraLifeCrumbs: 3,
     greenCrumbInterval: 7,
     gateCycleMs: 4200,
+    movingHazardSpeedMultiplier: 0.85,
     requiredKeyLimit: 2,
     forgivingHits: false,
   },
@@ -160,6 +172,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     extraLifeCrumbs: 3,
     greenCrumbInterval: 11,
     gateCycleMs: 3300,
+    movingHazardSpeedMultiplier: 1.1,
     forgivingHits: false,
   },
 };
@@ -673,6 +686,7 @@ export class MouseRace3D {
     const walls: WallRect[] = [];
     const crumbs: MazePickup[] = [];
     const traps: MazeHazard[] = [];
+    const movingHazards: MazeMovingHazard[] = [];
     const trapGlows: THREE.Mesh[] = [];
     const noisyTiles: MazeNoisyTile[] = [];
     const doors: MazeDoor[] = [];
@@ -905,6 +919,45 @@ export class MouseRace3D {
           glow.rotation.x = -Math.PI / 2;
           glow.position.set(x, 0.012, z);
           glow.userData = { kind: "trap" };
+          group.add(glow);
+          trapGlows.push(glow);
+          return;
+        }
+
+        if (cell === MOVING_HAZARD_SYMBOL) {
+          const movingHazard = this.buildMovingHazard(level);
+          movingHazard.position.set(x, 0.06, z);
+          group.add(movingHazard);
+          const axis = (row + col) % 2 === 0 ? "x" : "z";
+          const hazard: MazeMovingHazard = {
+            mesh: movingHazard,
+            position: movingHazard.position.clone(),
+            row,
+            col,
+            kind: "moving",
+            anchorPosition: movingHazard.position.clone(),
+            movementAxis: axis,
+            travelDistance: this.tileSize * 0.72,
+            speed: 1.15,
+            currentPhase: ((row * 19 + col * 23) % 360) * THREE.MathUtils.DEG2RAD,
+          };
+          traps.push(hazard);
+          movingHazards.push(hazard);
+
+          const glow = new THREE.Mesh(
+            new THREE.RingGeometry(0.48, 0.82, 32),
+            new THREE.MeshBasicMaterial({
+              color: level.theme.hazard,
+              transparent: true,
+              opacity: 0.34,
+              side: THREE.DoubleSide,
+              depthWrite: false,
+            }),
+          );
+          glow.rotation.x = -Math.PI / 2;
+          glow.position.copy(movingHazard.position);
+          glow.position.y = 0.024;
+          glow.userData = { kind: "moving", hazard };
           group.add(glow);
           trapGlows.push(glow);
           return;
@@ -1195,6 +1248,7 @@ export class MouseRace3D {
       wallGrid,
       crumbs,
       traps,
+      movingHazards,
       trapGlows,
       noisyTiles,
       doors,
@@ -2410,6 +2464,30 @@ export class MouseRace3D {
     return texture;
   }
 
+  private buildMovingHazard(level: LevelDefinition): THREE.Group {
+    if (level.theme.hazardStyle === "void") {
+      const rift = this.buildVoidRift();
+      rift.scale.setScalar(0.92);
+      return rift;
+    }
+
+    if (level.theme.hazardStyle === "water") {
+      const water = this.buildWaterTrap();
+      water.scale.setScalar(0.92);
+      return water;
+    }
+
+    if (level.theme.hazardStyle === "lava") {
+      const lava = this.buildLavaPit();
+      lava.scale.setScalar(0.92);
+      return lava;
+    }
+
+    const trap = this.buildMouseTrap();
+    trap.scale.setScalar(0.9);
+    return trap;
+  }
+
   private buildLavaPit(): THREE.Group {
     const group = new THREE.Group();
     const canvas = document.createElement("canvas");
@@ -2997,7 +3075,26 @@ export class MouseRace3D {
     return !!this.catInvestigateTarget && now < this.catInvestigateUntil;
   }
 
+  private updateMovingHazards(now: number): void {
+    if (!this.maze.movingHazards.length) return;
+
+    const speedMultiplier = DIFFICULTY_SETTINGS[this.difficulty].movingHazardSpeedMultiplier;
+    for (const hazard of this.maze.movingHazards) {
+      hazard.currentPhase = now * 0.001 * hazard.speed * speedMultiplier + ((hazard.row * 19 + hazard.col * 23) % 360) * THREE.MathUtils.DEG2RAD;
+      const offset = Math.sin(hazard.currentPhase) * hazard.travelDistance;
+      hazard.position.copy(hazard.anchorPosition);
+      if (hazard.movementAxis === "x") {
+        hazard.position.x += offset;
+      } else {
+        hazard.position.z += offset;
+      }
+      hazard.mesh.position.copy(hazard.position);
+    }
+  }
+
   private updatePickups(delta: number, now: number): void {
+    this.updateMovingHazards(now);
+
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
       crumb.mesh.rotation.y += 0.03;
@@ -3033,6 +3130,7 @@ export class MouseRace3D {
         this.audio.playTrap();
         const msg = trap.kind === "lava" ? "You fell into a lava pit!"
           : trap.kind === "water" ? "You sank into a water trap!"
+          : trap.kind === "moving" ? "A moving hazard clipped you!"
           : "A mousetrap snapped shut!";
         this.triggerHazard(msg);
       }
@@ -3093,6 +3191,16 @@ export class MouseRace3D {
           const scale = 0.55 + pulse * 0.85;
           glow.scale.set(scale, scale, scale);
           (glow.material as THREE.MeshBasicMaterial).opacity = 0.06 + pulse * 0.34;
+        } else if (kind === "moving") {
+          const hazard = (glow.userData as { hazard?: MazeMovingHazard }).hazard;
+          if (hazard) {
+            glow.position.x = hazard.position.x;
+            glow.position.z = hazard.position.z;
+          }
+          const pulse = 0.5 + Math.sin(now * 0.006) * 0.5;
+          const scale = 0.78 + pulse * 0.26;
+          glow.scale.set(scale, scale, scale);
+          (glow.material as THREE.MeshBasicMaterial).opacity = 0.2 + pulse * 0.32;
         } else {
           const pulse = 0.5 + Math.sin(now * 0.004) * 0.5;
           const scale = 0.9 + pulse * 0.18;
