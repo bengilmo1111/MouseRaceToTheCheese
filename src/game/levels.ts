@@ -37,8 +37,16 @@ export type LevelDefinition = {
   aliceTimeMs: number;
   catSpeed: number;
   theme: LevelTheme;
+  noisyTiles?: NoisyTilePlacement[];
   map: string[];
 };
+
+export type NoisyTilePlacement = {
+  row: number;
+  col: number;
+};
+
+export const NOISY_TILE_SYMBOL = "N";
 
 export const LEVELS: LevelDefinition[] = [
   {
@@ -60,6 +68,7 @@ export const LEVELS: LevelDefinition[] = [
       hud: "#6d471f",
       fog: 0xffe7b5,
     },
+    noisyTiles: [{ row: 1, col: 20 }],
     map: [
       "#########################################",
       "#PBH# .   #. T  . # ..  #  .#. .#. ..  .#",
@@ -141,6 +150,7 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 5.6,
       },
     },
+    noisyTiles: [{ row: 3, col: 18 }],
     map: [
       "#########################################",
       "#P   B .#.... .   .    .# .   ..#     #L#",
@@ -222,6 +232,7 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 4.8,
       },
     },
+    noisyTiles: [{ row: 6, col: 17 }],
     map: [
       "#########################################",
       "#P. # B. .      # .T# ...     #.  #..   #",
@@ -303,6 +314,7 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 6.4,
       },
     },
+    noisyTiles: [{ row: 9, col: 21 }],
     map: [
       "#########################################",
       "#PO D . . . . . . . . . . . . . . . . . #",
