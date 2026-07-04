@@ -295,6 +295,7 @@ export class MouseRace3D {
     status: this.must<HTMLDivElement>("hud-status"),
     toast: this.must<HTMLDivElement>("hud-toast"),
     vignette: this.must<HTMLDivElement>("vignette"),
+    timerTrack: this.must<HTMLDivElement>("timer-track"),
     timerFill: this.must<HTMLDivElement>("timer-fill"),
     timerAlice: this.must<HTMLImageElement>("timer-alice"),
     scoutButton: this.must<HTMLButtonElement>("scout-btn"),
@@ -302,6 +303,7 @@ export class MouseRace3D {
   };
   private lastGuideLabel = "";
   private lastDistanceText = "";
+  private lastStatusSignature = "";
   private guideTrail?: THREE.Group;
   private guideTrailUntil = 0;
   private guideTrailTarget = "";
@@ -659,6 +661,7 @@ export class MouseRace3D {
     this.wasScoutPeekActive = false;
     this.hasWonGame = false;
     this.hasSeenIntro = false;
+    this.lastStatusSignature = "";
     this.loadLevel(this.startLevelIndex);
     this.showIntro();
   }
@@ -701,6 +704,7 @@ export class MouseRace3D {
     this.catInvestigateTarget = undefined;
     this.catInvestigateUntil = 0;
     this.hud.vignette.classList.remove("active");
+    this.hud.timerTrack.classList.remove("danger");
     this.updateTheme(LEVELS[index]);
     this.rebuildScoutPins();
     this.refreshHud();
@@ -3897,6 +3901,7 @@ export class MouseRace3D {
     this.hud.timerAlice.style.setProperty("--alice-progress", progress.toString());
     this.hud.timerAlice.setAttribute("aria-label", `Alice is ${Math.round(progress * 100)}% of the way to the cheese`);
 
+    this.hud.timerTrack.classList.toggle("danger", progress > 0.8);
     if (progress > 0.8) {
       this.hud.timerFill.style.background = "linear-gradient(90deg, #ff9252 0%, #e85452 100%)";
     } else if (progress > 0.55) {
@@ -3924,6 +3929,7 @@ export class MouseRace3D {
       "Alice Got It First!",
       "Baby Alice grabbed the cheese this time! 🍼 Be speedy — you'll beat her next race!",
       "alice",
+      "Try Again",
     );
   }
 
@@ -4207,7 +4213,12 @@ export class MouseRace3D {
 
     if (DIFFICULTY_SETTINGS[this.difficulty].forgivingHits) {
       this.refreshHud();
-      this.showOverlay("Ouch! You're OK! 💪", `${message}\nDon't worry — no lives lost in Kid mode. Keep going!`);
+      this.showOverlay(
+        "Ouch! You're OK! 💪",
+        `${message}\nDon't worry — no lives lost in Kid mode. Keep going!`,
+        undefined,
+        "Keep Going!",
+      );
       return;
     }
 
@@ -4216,11 +4227,21 @@ export class MouseRace3D {
 
     if (this.lives <= 0) {
       this.audio.playGameOver();
-      this.showOverlay("Oh No!", `${message}\nAll out of lives this time — but every great mouse tries again! 🐭`, "alice");
+      this.showOverlay(
+        "Oh No!",
+        `${message}\nAll out of lives this time — but every great mouse tries again! 🐭`,
+        "alice",
+        "Try Again",
+      );
       return;
     }
 
-    this.showOverlay("Ouch!", `${message}\nYou still have ${this.lives} ${this.lives === 1 ? "life" : "lives"} left. You've got this! 💪`);
+    this.showOverlay(
+      "Ouch!",
+      `${message}\nYou still have ${this.lives} ${this.lives === 1 ? "life" : "lives"} left. You've got this! 💪`,
+      undefined,
+      "Keep Going!",
+    );
   }
 
   private completeLevel(): void {
@@ -4237,20 +4258,27 @@ export class MouseRace3D {
         "🎉 You Win! 🎉",
         "You beat Alice through every single maze! You are the Cheese Champion! 🧀🏆",
         "cheese",
+        "Play Again",
       );
       return;
     }
 
-    this.showOverlay("🧀 Cheese! 🎉", "You got the cheese before Alice! Ready for the next maze?", "cheese");
+    this.showOverlay(
+      "🧀 Cheese! 🎉",
+      "You got the cheese before Alice! Ready for the next maze?",
+      "cheese",
+      "Next Maze ➜",
+    );
   }
 
   private isOverlayOpen(): boolean {
     return !this.overlay.root.classList.contains("hidden") || !this.startScreen.classList.contains("hidden");
   }
 
-  private showOverlay(title: string, body: string, icon?: "alice" | "cheese"): void {
+  private showOverlay(title: string, body: string, icon?: "alice" | "cheese", buttonLabel = "Continue"): void {
     this.overlay.title.textContent = title;
     this.overlay.body.textContent = body;
+    this.overlay.button.textContent = buttonLabel;
     if (icon === "alice") {
       this.overlay.icon.src = "/src/Images/file_00000000e9d0720b907b128f233c1f66.png";
       this.overlay.icon.classList.remove("hidden");
@@ -4310,6 +4338,8 @@ export class MouseRace3D {
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
       this.getIntroBody(),
+      undefined,
+      "Let's Go! 🐭",
     );
   }
 
@@ -4325,6 +4355,7 @@ export class MouseRace3D {
     this.catInvestigateTarget = undefined;
     this.catInvestigateUntil = 0;
     this.hud.vignette.classList.remove("active");
+    this.hud.timerTrack.classList.remove("danger");
     this.playerHeading = this.headingFromTo(this.maze.startPoint, this.maze.cheesePoint);
     this.cameraYaw = this.playerHeading;
     this.player.rotation.y = this.playerHeading;
@@ -4346,6 +4377,15 @@ export class MouseRace3D {
     const hearts = "♥".repeat(Math.max(0, this.lives)) + "♡".repeat(Math.max(0, maxLives - this.lives));
     const keysLeft = this.remainingRequiredCheeseKeys();
     const keysTotal = this.totalRequiredCheeseKeys();
+    const statusSignature = `${this.lives}|${this.crumbs}|${keysLeft}`;
+    if (this.lastStatusSignature && statusSignature !== this.lastStatusSignature) {
+      const lostLife = this.lives < Number(this.lastStatusSignature.split("|")[0]);
+      this.hud.status.classList.remove("bump", "hurt");
+      // Force a reflow so the animation restarts even on back-to-back pickups.
+      void this.hud.status.offsetWidth;
+      this.hud.status.classList.add(lostLife ? "hurt" : "bump");
+    }
+    this.lastStatusSignature = statusSignature;
     this.hud.level.textContent = `${diff.label} · L${level.id}`;
     this.hud.level.style.color = level.theme.hud;
     this.hud.status.innerHTML =
