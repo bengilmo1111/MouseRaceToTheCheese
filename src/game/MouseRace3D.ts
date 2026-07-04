@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
+import { BREAKABLE_WALL_SYMBOL, LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
@@ -91,6 +91,15 @@ type MazeBlock = {
   position: THREE.Vector3;
 };
 
+type MazeBreakableWall = {
+  mesh: THREE.Object3D;
+  row: number;
+  col: number;
+  position: THREE.Vector3;
+  rect: WallRect;
+  active: boolean;
+};
+
 type MazeState = {
   map: string[];
   originX: number;
@@ -108,6 +117,7 @@ type MazeState = {
   plates: MazePlate[];
   gates: MazeGate[];
   blocks: MazeBlock[];
+  breakableWalls: MazeBreakableWall[];
   gems: MazePickup[];
   mouseHoles: MazePickup[];
   cheeseKeys: MazePickup[];
@@ -134,6 +144,7 @@ const SCOUT_CRUMBS_PER_CHARGE = 5;
 const MAX_SCOUT_PEEKS = 3;
 const GREEN_CRUMB_SKIP_EVERY = 3;
 const NOISY_TILE_COOLDOWN_MS = 2600;
+const BREAKABLE_WALL_CRUMB_COST = 3;
 const CAT_INVESTIGATE_DURATION_MS = 5200;
 const DEFAULT_DIFFICULTY: DifficultyKey = "easy";
 const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
@@ -693,6 +704,7 @@ export class MouseRace3D {
     const plates: MazePlate[] = [];
     const gates: MazeGate[] = [];
     const blocks: MazeBlock[] = [];
+    const breakableWalls: MazeBreakableWall[] = [];
     const gems: MazePickup[] = [];
     const mouseHoles: MazePickup[] = [];
     const cheeseKeys: MazePickup[] = [];
@@ -924,6 +936,22 @@ export class MouseRace3D {
           return;
         }
 
+        if (cell === BREAKABLE_WALL_SYMBOL) {
+          const wallHalfSize = this.tileSize * 0.45;
+          const biscuitWall = this.buildBreakableBiscuitWall(level, wallHeight);
+          biscuitWall.position.set(x, wallHeight * 0.5 - 0.02, z);
+          group.add(biscuitWall);
+          const rect = {
+            minX: x - wallHalfSize,
+            maxX: x + wallHalfSize,
+            minZ: z - wallHalfSize,
+            maxZ: z + wallHalfSize,
+          };
+          addWallRect(row, col, rect);
+          breakableWalls.push({ mesh: biscuitWall, row, col, position: biscuitWall.position.clone(), rect, active: true });
+          return;
+        }
+
         if (cell === MOVING_HAZARD_SYMBOL) {
           const movingHazard = this.buildMovingHazard(level);
           movingHazard.position.set(x, 0.06, z);
@@ -1091,7 +1119,7 @@ export class MouseRace3D {
         }
 
         if (cell === ROTATING_GATE_SYMBOL) {
-          const orientation = map[row]?.[col - 1] !== "#" || map[row]?.[col + 1] !== "#" ? "horizontal" : "vertical";
+          const orientation = this.isOpenMapCell(map[row]?.[col - 1]) || this.isOpenMapCell(map[row]?.[col + 1]) ? "horizontal" : "vertical";
           const gateLength = this.tileSize * 0.94;
           const gateThickness = this.tileSize * 0.16;
           const gateHeight = Math.max(0.68, wallHeight * 0.5);
@@ -1181,13 +1209,13 @@ export class MouseRace3D {
           patrol.push(new THREE.Vector3(x, 0.34, z));
         }
 
-        if (cell !== "#") {
+        if (this.isOpenMapCell(cell)) {
           const neighbors = [
             map[row]?.[col - 1],
             map[row]?.[col + 1],
             map[row - 1]?.[col],
             map[row + 1]?.[col],
-          ].filter((value) => value && value !== "#");
+          ].filter((value) => this.isOpenMapCell(value));
 
           if (neighbors.length >= 3) {
             patrol.push(new THREE.Vector3(x, 0.34, z));
@@ -1255,6 +1283,7 @@ export class MouseRace3D {
       plates,
       gates,
       blocks,
+      breakableWalls,
       gems,
       mouseHoles,
       cheeseKeys,
@@ -1267,6 +1296,10 @@ export class MouseRace3D {
       mazeWidth: width,
       mazeDepth: depth,
     };
+  }
+
+  private isOpenMapCell(cell: string | undefined): boolean {
+    return !!cell && cell !== "#" && cell !== BREAKABLE_WALL_SYMBOL;
   }
 
   private resolveLevelMap(level: LevelDefinition): string[] {
@@ -1649,6 +1682,48 @@ export class MouseRace3D {
     }
 
     group.add(this.createWorldMarker("PUSH", 0xfff3a1, 0x7f4a00, 1.15));
+    return group;
+  }
+
+  private buildBreakableBiscuitWall(level: LevelDefinition, wallHeight: number): THREE.Group {
+    const group = new THREE.Group();
+    const biscuitMat = new THREE.MeshStandardMaterial({
+      color: 0xd8a65a,
+      roughness: 0.92,
+      emissive: 0x7a4519,
+      emissiveIntensity: 0.08,
+    });
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9b632d, roughness: 0.95 });
+    const chipMat = new THREE.MeshStandardMaterial({ color: 0x6f3f1d, roughness: 0.9 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(this.tileSize * 0.9, wallHeight * 0.9, this.tileSize * 0.36), biscuitMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+
+    const topCrust = new THREE.Mesh(new THREE.BoxGeometry(this.tileSize * 0.92, 0.12, this.tileSize * 0.38), edgeMat);
+    topCrust.position.y = wallHeight * 0.45;
+    topCrust.castShadow = true;
+    group.add(topCrust);
+
+    const bottomCrust = topCrust.clone();
+    bottomCrust.position.y = -wallHeight * 0.45;
+    group.add(bottomCrust);
+
+    const chips = [
+      [-0.72, 0.32, -0.49, 0.1],
+      [-0.25, -0.18, -0.5, 0.08],
+      [0.38, 0.14, -0.5, 0.11],
+      [0.78, -0.35, -0.49, 0.075],
+    ];
+    for (const [x, y, z, radius] of chips) {
+      const chip = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), chipMat);
+      chip.position.set(x, y, z);
+      chip.scale.z = 0.28;
+      group.add(chip);
+    }
+
+    group.add(this.createWorldMarker("BITE", 0xffefbf, level.theme.trim, wallHeight * 0.62));
     return group;
   }
 
@@ -2679,6 +2754,12 @@ export class MouseRace3D {
   // Dispose a level's geometries and materials on unload. Textures are left
   // alone on purpose: they live in this.textureCache and are reused by later
   // levels that share a theme.
+  private disposeObject(object: THREE.Object3D): void {
+    const group = new THREE.Group();
+    group.add(object);
+    this.disposeGroup(group);
+  }
+
   private disposeGroup(group: THREE.Group): void {
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
@@ -2886,6 +2967,11 @@ export class MouseRace3D {
         continue;
       }
 
+      const breakableWall = this.findBreakableWallByRect(wall);
+      if (breakableWall && this.tryBreakWall(breakableWall)) {
+        continue;
+      }
+
       this.pushOutOfRect(position, radius, wall, axis);
     }
   }
@@ -2905,6 +2991,59 @@ export class MouseRace3D {
     } else {
       position.z = position.z < (rect.minZ + rect.maxZ) * 0.5 ? rect.minZ - radius : rect.maxZ + radius;
     }
+  }
+
+  private findBreakableWallByRect(rect: WallRect): MazeBreakableWall | undefined {
+    return this.maze.breakableWalls.find((wall) => wall.active && wall.rect === rect);
+  }
+
+  private tryBreakWall(wall: MazeBreakableWall): boolean {
+    if (!wall.active) {
+      return true;
+    }
+
+    if (this.crumbs >= BREAKABLE_WALL_CRUMB_COST) {
+      this.crumbs -= BREAKABLE_WALL_CRUMB_COST;
+      this.breakWall(wall, `🍪 Nibbled through! -${BREAKABLE_WALL_CRUMB_COST} crumbs.`);
+      return true;
+    }
+
+    if (this.scoutPeeks > 0) {
+      this.scoutPeeks -= 1;
+      this.breakWall(wall, "💚 Green crumb charge crumbled the biscuit wall!");
+      return true;
+    }
+
+    this.flashHint(`Need ${BREAKABLE_WALL_CRUMB_COST} crumbs or a green crumb charge to nibble through!`, true);
+    return false;
+  }
+
+  private breakWall(wall: MazeBreakableWall, message: string): void {
+    wall.active = false;
+    wall.mesh.visible = false;
+    this.maze.levelGroup.remove(wall.mesh);
+    this.disposeObject(wall.mesh);
+
+    const gridCell = this.maze.wallGrid[wall.row * this.maze.cols + wall.col];
+    const gridIndex = gridCell.indexOf(wall.rect);
+    if (gridIndex >= 0) {
+      gridCell.splice(gridIndex, 1);
+    }
+    const wallIndex = this.maze.walls.indexOf(wall.rect);
+    if (wallIndex >= 0) {
+      this.maze.walls.splice(wallIndex, 1);
+    }
+
+    const rowCells = [...this.maze.map[wall.row]];
+    rowCells[wall.col] = " ";
+    this.maze.map[wall.row] = rowCells.join("");
+
+    this.spawnPickupBurst(wall.position, 0xd49a54, 900);
+    this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.06);
+    this.audio.playCrumb();
+    this.flashHint(message);
+    this.refreshHud();
+    this.refreshScoutButton();
   }
 
   private updateGates(now: number): void {
@@ -2965,7 +3104,7 @@ export class MouseRace3D {
     }
 
     const cell = this.maze.map[row]?.[col];
-    if (!cell || cell === "#" || cell === "T") {
+    if (!cell || cell === "#" || cell === BREAKABLE_WALL_SYMBOL || cell === "T") {
       return false;
     }
 
