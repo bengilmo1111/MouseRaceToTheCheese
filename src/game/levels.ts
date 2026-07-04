@@ -49,6 +49,7 @@ export type NoisyTilePlacement = {
 export const NOISY_TILE_SYMBOL = "N";
 export const ROTATING_GATE_SYMBOL = "R";
 export const MOVING_HAZARD_SYMBOL = "M";
+export const BREAKABLE_WALL_SYMBOL = "X";
 
 export const LEVELS: LevelDefinition[] = [
   {
@@ -73,7 +74,7 @@ export const LEVELS: LevelDefinition[] = [
     noisyTiles: [{ row: 1, col: 20 }],
     map: [
       "#########################################",
-      "#PBH# .   #. T  . # ..  #  .#. .#. ..  .#",
+      "#PBHX .   #. T  . # ..  #  .#. .#. ..  .#",
       "### #.#.#.### # ###.#.# # # #.### ### # #",
       "#.# # # #.. #.# R . #.# . #.  # ..# ..#.#",
       "#.#.### ### # #######.#######.# ### ### #",
