@@ -287,6 +287,20 @@ export class MouseRace3D {
     eyeR: THREE.Object3D;
     nose: THREE.Object3D;
   };
+  private readonly mousePaws: { mesh: THREE.Mesh; baseY: number; baseZ: number; phase: number }[] = [];
+  private stridePhase = 0;
+  private mouseHappyUntil = 0;
+  private catParts!: {
+    paws: { mesh: THREE.Mesh; baseY: number; baseZ: number; phase: number }[];
+    tail: THREE.Group;
+    earL: THREE.Group;
+    earR: THREE.Group;
+    pupilL: THREE.Mesh;
+    pupilR: THREE.Mesh;
+  };
+  private catStridePhase = 0;
+  private catStrideAmp = 0;
+  private cheeseFx!: { ring: THREE.Mesh; beacon: THREE.Mesh };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
 
@@ -611,6 +625,7 @@ export class MouseRace3D {
       warpTrap: () => this.warpToHazard("trap"),
       warpCheese: () => this.warpToCheese(),
       warpCat: () => this.warpToCat(),
+      warpNearCat: (distance?: number) => this.warpNearCat(distance),
       forceHit: () => this.triggerHazard("Forced agent hit."),
       setAliceProgress: (ratio: number) => {
         this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * Math.max(0, Math.min(1, ratio));
@@ -1576,15 +1591,18 @@ export class MouseRace3D {
     group.add(earL, earR);
 
     for (const side of [-1, 1]) {
+      // Trot gait: diagonal pairs move together (front-left with back-right).
       const frontPaw = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), pawMat);
       frontPaw.scale.set(1, 0.55, 1.2);
       frontPaw.position.set(side * 0.18, -0.24, -0.32);
       group.add(frontPaw);
+      this.mousePaws.push({ mesh: frontPaw, baseY: -0.24, baseZ: -0.32, phase: side < 0 ? 0 : Math.PI });
 
       const backPaw = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), pawMat);
       backPaw.scale.set(1, 0.55, 1.3);
       backPaw.position.set(side * 0.22, -0.26, 0.28);
       group.add(backPaw);
+      this.mousePaws.push({ mesh: backPaw, baseY: -0.26, baseZ: 0.28, phase: side < 0 ? Math.PI : 0 });
 
       // Lines render 1px and vanish at gameplay distance; thin cylinders
       // keep the whiskers readable from the chase camera.
@@ -1620,8 +1638,18 @@ export class MouseRace3D {
     return group;
   }
 
-  private animateMouse(now: number): void {
+  private animateMouse(now: number, delta: number): void {
     if (!this.mouseParts) return;
+
+    // Paw patter is driven by distance covered, not wall time, so the feet
+    // stay in step with the ground at any speed and rest when standing.
+    const speedRatio = THREE.MathUtils.clamp(Math.abs(this.currentSpeed) / this.moveSpeed, 0, 1);
+    this.stridePhase += Math.abs(this.currentSpeed) * delta * 7;
+    for (const paw of this.mousePaws) {
+      const swing = Math.sin(this.stridePhase + paw.phase);
+      paw.mesh.position.z = paw.baseZ - swing * 0.15 * speedRatio;
+      paw.mesh.position.y = paw.baseY + Math.max(0, swing) * 0.08 * speedRatio;
+    }
 
     // The tail trails behind along +z, so a yaw sway makes it slither
     // side-to-side — faster and wider the quicker the mouse scurries.
@@ -1642,6 +1670,17 @@ export class MouseRace3D {
     const sniff = 1 + Math.max(0, Math.sin(now * 0.02)) * 0.22;
     this.mouseParts.nose.scale.setScalar(sniff);
 
+    // Nibble celebration: for half a second after a pickup the ears splay
+    // and the tail wags double-time. Additive on top of the base pose.
+    const happy = Math.max(0, (this.mouseHappyUntil - now) / 500);
+    if (happy > 0) {
+      const wiggle = Math.sin(now * 0.045) * happy;
+      this.mouseParts.earL.rotation.z -= wiggle * 0.3;
+      this.mouseParts.earR.rotation.z += wiggle * 0.3;
+      this.mouseParts.tail.rotation.y += wiggle * 0.5;
+      this.mouseParts.nose.scale.setScalar(sniff + happy * 0.3);
+    }
+
     const blinkPeriod = 3600;
     const phase = (now % blinkPeriod) / blinkPeriod;
     let blink = 0;
@@ -1651,6 +1690,39 @@ export class MouseRace3D {
     const eyeY = 1 - blink * 0.92;
     this.mouseParts.eyeL.scale.y = eyeY;
     this.mouseParts.eyeR.scale.y = eyeY;
+  }
+
+  private animateCat(now: number, delta: number): void {
+    if (!this.catParts) return;
+
+    // Stride amplitude eases in/out so paws settle when the cat stops
+    // (updateCat bumps catStrideAmp toward 1 whenever it actually moves).
+    this.catStrideAmp = THREE.MathUtils.lerp(this.catStrideAmp, 0, Math.min(1, delta * 6));
+    for (const paw of this.catParts.paws) {
+      const swing = Math.sin(this.catStridePhase + paw.phase);
+      paw.mesh.position.z = paw.baseZ - swing * 0.18 * this.catStrideAmp;
+      paw.mesh.position.y = paw.baseY + Math.max(0, swing) * 0.1 * this.catStrideAmp;
+    }
+
+    // Tail: lazy swish on patrol, fast lash when hunting. Ears flatten back
+    // and the slit pupils go round and wide in hunt mode — classic pounce
+    // telegraphing that kids can read at a glance.
+    const hunting = this.catChasing;
+    const swishSpeed = hunting ? 0.014 : 0.004;
+    const swishAmp = hunting ? 0.55 : 0.28;
+    this.catParts.tail.rotation.y = Math.sin(now * swishSpeed) * swishAmp;
+    this.catParts.tail.rotation.x = Math.sin(now * swishSpeed * 0.7 + 1.2) * swishAmp * 0.25;
+
+    const earBack = hunting ? -0.55 : 0;
+    const earTwitch = Math.sin(now * 0.01) * 0.05;
+    this.catParts.earL.rotation.x = THREE.MathUtils.lerp(this.catParts.earL.rotation.x, earBack + earTwitch, Math.min(1, delta * 8));
+    this.catParts.earR.rotation.x = THREE.MathUtils.lerp(this.catParts.earR.rotation.x, earBack - earTwitch, Math.min(1, delta * 8));
+
+    const pupilScale = hunting ? 3.2 : 1;
+    for (const p of [this.catParts.pupilL, this.catParts.pupilR]) {
+      const next = THREE.MathUtils.lerp(p.scale.x, pupilScale, Math.min(1, delta * 8));
+      p.scale.set(next, 1, next);
+    }
   }
 
   private buildCat(): THREE.Group {
@@ -1698,6 +1770,8 @@ export class MouseRace3D {
     nose.position.set(0, 0.22, -0.82);
     group.add(nose);
 
+    const pupils: THREE.Mesh[] = [];
+    const ears: THREE.Group[] = [];
     for (const side of [-1, 1]) {
       const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), eyeMat);
       eye.position.set(side * 0.13, 0.32, -0.66);
@@ -1705,27 +1779,64 @@ export class MouseRace3D {
       const slit = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.07, 6), pupil);
       slit.position.set(side * 0.13, 0.32, -0.7);
       group.add(slit);
+      pupils.push(slit);
 
+      // Ear cone + inner share a pivot group so the pair can flatten back
+      // together when the cat locks on.
+      const earGroup = new THREE.Group();
+      earGroup.position.set(side * 0.2, 0.58, -0.56);
       const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.26, 4), fur);
-      ear.position.set(side * 0.2, 0.58, -0.56);
       ear.rotation.set(0, Math.PI / 4, side * 0.15);
       ear.castShadow = true;
-      group.add(ear);
+      earGroup.add(ear);
       const earInner = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 4), noseMat);
-      earInner.position.set(side * 0.2, 0.55, -0.55);
+      earInner.position.set(0, -0.03, 0.01);
       earInner.rotation.set(0, Math.PI / 4, side * 0.15);
-      group.add(earInner);
+      earGroup.add(earInner);
+      group.add(earGroup);
+      ears.push(earGroup);
     }
 
+    const catPaws: { mesh: THREE.Mesh; baseY: number; baseZ: number; phase: number }[] = [];
+    for (const side of [-1, 1]) {
+      const frontPaw = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), belly);
+      frontPaw.scale.set(1, 0.55, 1.25);
+      frontPaw.position.set(side * 0.24, -0.4, -0.36);
+      group.add(frontPaw);
+      catPaws.push({ mesh: frontPaw, baseY: -0.4, baseZ: -0.36, phase: side < 0 ? 0 : Math.PI });
+
+      const backPaw = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), belly);
+      backPaw.scale.set(1, 0.55, 1.35);
+      backPaw.position.set(side * 0.3, -0.42, 0.32);
+      group.add(backPaw);
+      catPaws.push({ mesh: backPaw, baseY: -0.42, baseZ: 0.32, phase: side < 0 ? Math.PI : 0 });
+    }
+
+    // Tail hangs off a pivot at the rump so it can swish side to side.
+    const tailGroup = new THREE.Group();
+    tailGroup.position.set(0, -0.05, 0.55);
     const tailCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, -0.05, 0.55),
-      new THREE.Vector3(0.1, 0.2, 0.85),
-      new THREE.Vector3(-0.05, 0.5, 1.0),
-      new THREE.Vector3(0.18, 0.7, 0.86),
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0.1, 0.25, 0.3),
+      new THREE.Vector3(-0.05, 0.55, 0.45),
+      new THREE.Vector3(0.18, 0.75, 0.31),
     ]);
     const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.07, 8, false), fur);
     tail.castShadow = true;
-    group.add(tail);
+    tailGroup.add(tail);
+    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), stripe);
+    tailTip.position.set(0.18, 0.75, 0.31);
+    tailGroup.add(tailTip);
+    group.add(tailGroup);
+
+    this.catParts = {
+      paws: catPaws,
+      tail: tailGroup,
+      earL: ears[0],
+      earR: ears[1],
+      pupilL: pupils[0],
+      pupilR: pupils[1],
+    };
 
     return group;
   }
@@ -1804,7 +1915,19 @@ export class MouseRace3D {
     group.add(goalRing);
     group.add(this.createWorldMarker("CHEESE", 0xfff1a7, 0x7f4a00, 2.85));
 
+    this.cheeseFx = { ring: goalRing, beacon };
+
     return group;
+  }
+
+  private animateCheese(now: number): void {
+    if (!this.cheeseFx) return;
+
+    // Gentle "come here" pulse on the goal ring and beacon.
+    const pulse = 1 + Math.sin(now * 0.0035) * 0.07;
+    this.cheeseFx.ring.scale.set(pulse, pulse, 1);
+    const beaconMat = this.cheeseFx.beacon.material as THREE.MeshStandardMaterial;
+    beaconMat.opacity = 0.14 + (Math.sin(now * 0.0028) * 0.5 + 0.5) * 0.1;
   }
 
   private buildCheeseBlock(): THREE.Group {
@@ -2960,7 +3083,9 @@ export class MouseRace3D {
     this.updatePickupBursts(delta);
     this.updateGuideTrail(now);
     this.updateScoutPins();
-    this.animateMouse(now);
+    this.animateMouse(now, delta);
+    this.animateCat(now, delta);
+    this.animateCheese(now);
     this.updatePlayerLight();
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
@@ -3040,6 +3165,38 @@ export class MouseRace3D {
   private warpToCat(): void {
     this.player.position.set(this.cat.position.x, 0.3, this.cat.position.z);
     this.updateCat(0, performance.now());
+    this.updatePlaytestState();
+  }
+
+  // Playtest helper: land near the cat (not on it) so a chase can be
+  // observed without instantly triggering the catch.
+  private warpNearCat(distance = 2.6): void {
+    if (!this.maze) {
+      return;
+    }
+
+    let best: THREE.Vector3 | undefined;
+    let bestDistance = 0;
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (i / 8) * Math.PI * 2;
+      const candidate = this.cat.position.clone();
+      candidate.y = 0.3;
+      const step = new THREE.Vector3(Math.sin(angle) * distance, 0, Math.cos(angle) * distance);
+      this.moveWithCollisions(candidate, PLAYER_RADIUS, step);
+      const settled = candidate.distanceTo(this.cat.position);
+      if (settled > bestDistance) {
+        bestDistance = settled;
+        best = candidate;
+      }
+    }
+
+    if (!best || bestDistance < 1.2) {
+      return;
+    }
+
+    this.player.position.copy(best);
+    this.playerHeading = this.headingFromTo(this.player.position, this.cat.position);
+    this.player.rotation.y = this.playerHeading;
     this.updatePlaytestState();
   }
 
@@ -3432,6 +3589,8 @@ export class MouseRace3D {
 
     const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : investigating ? 0.98 : 0.85;
     vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
+    this.catStridePhase += vector.length() * 9;
+    this.catStrideAmp = Math.min(1, this.catStrideAmp + delta * 8);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.rotation.z = Math.sin(now * 0.012) * (shouldChase ? 0.14 : 0.09);
@@ -3487,6 +3646,7 @@ export class MouseRace3D {
         } else {
           this.audio.playCrumb();
         }
+        this.mouseHappyUntil = now + 500;
         this.collectScoutCrumb();
         if (crumb.guideCrumb) {
           this.revealObjectivePath();
@@ -3612,6 +3772,7 @@ export class MouseRace3D {
         key.active = false;
         key.mesh.visible = false;
         this.collectedCheeseKeys += 1;
+        this.mouseHappyUntil = now + 500;
         this.spawnPickupBurst(key.position, 0xffdf5a);
         this.audio.playGem();
         const keysStillNeeded = this.remainingRequiredCheeseKeys();
