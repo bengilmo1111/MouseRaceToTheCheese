@@ -65,6 +65,7 @@ type MazeState = {
   trapGlows: THREE.Mesh[];
   blocks: MazeBlock[];
   gems: MazePickup[];
+  mouseHoles: MazePickup[];
   cheeseKeys: MazePickup[];
   patrol: THREE.Vector3[];
   levelGroup: THREE.Group;
@@ -176,6 +177,7 @@ export class MouseRace3D {
   private levelComplete = false;
   private hasWonGame = false;
   private gemCooldownUntil = 0;
+  private mouseHoleCooldownUntil = 0;
   private hazardLockedUntil = 0;
   private cheeseLockHintUntil = 0;
   private aliceElapsedMs = 0;
@@ -631,6 +633,7 @@ export class MouseRace3D {
     const trapGlows: THREE.Mesh[] = [];
     const blocks: MazeBlock[] = [];
     const gems: MazePickup[] = [];
+    const mouseHoles: MazePickup[] = [];
     const cheeseKeys: MazePickup[] = [];
     const patrol: THREE.Vector3[] = [];
 
@@ -929,6 +932,14 @@ export class MouseRace3D {
           return;
         }
 
+        if (cell === "H") {
+          const hole = this.buildMouseHole(level.theme.accent, level.theme.trim);
+          hole.position.set(x, 0.02, z);
+          group.add(hole);
+          mouseHoles.push({ mesh: hole, position: new THREE.Vector3(x, 0.3, z), active: true });
+          return;
+        }
+
         if (cell === "K") {
           const key = this.buildCheeseKey(level.theme.accent);
           key.position.set(x, 0.45, z);
@@ -1003,6 +1014,10 @@ export class MouseRace3D {
     gems.forEach((gem, indexGem) => {
       gem.pairIndex = gems.length > 1 ? (indexGem + 1) % gems.length : undefined;
     });
+    mouseHoles.forEach((hole, indexHole) => {
+      const pairedIndex = indexHole % 2 === 0 ? indexHole + 1 : indexHole - 1;
+      hole.pairIndex = pairedIndex < mouseHoles.length ? pairedIndex : undefined;
+    });
 
     return {
       map: level.map,
@@ -1017,6 +1032,7 @@ export class MouseRace3D {
       trapGlows,
       blocks,
       gems,
+      mouseHoles,
       cheeseKeys,
       patrol: patrol.length > 1 ? patrol : [catPoint.clone(), startPoint.clone()],
       levelGroup: group,
@@ -1454,6 +1470,60 @@ export class MouseRace3D {
     halo.rotation.x = -Math.PI / 2;
     halo.position.y = -0.55;
     group.add(halo);
+
+    return group;
+  }
+
+  private buildMouseHole(accentColor: number, trimColor: number): THREE.Group {
+    const group = new THREE.Group();
+    const burrowMat = new THREE.MeshStandardMaterial({
+      color: 0x2f1c13,
+      roughness: 0.96,
+      emissive: 0x140804,
+      emissiveIntensity: 0.28,
+      side: THREE.DoubleSide,
+    });
+    const rimMat = new THREE.MeshStandardMaterial({ color: trimColor, roughness: 0.88 });
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: accentColor,
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    const doorway = new THREE.Mesh(new THREE.CircleGeometry(0.46, 32, 0, Math.PI), burrowMat);
+    doorway.rotation.x = -Math.PI / 2;
+    doorway.position.set(0, 0.035, -0.14);
+    doorway.scale.set(1.05, 0.78, 1);
+    group.add(doorway);
+
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.055, 10, 28, Math.PI), rimMat);
+    arch.rotation.set(Math.PI / 2, 0, 0);
+    arch.position.set(0, 0.08, -0.14);
+    arch.scale.set(1.05, 0.78, 1);
+    arch.castShadow = true;
+    group.add(arch);
+
+    const threshold = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.16), rimMat);
+    threshold.position.set(0, 0.04, 0.2);
+    threshold.castShadow = true;
+    threshold.receiveShadow = true;
+    group.add(threshold);
+
+    const tunnel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.44, 0.34, 0.62, 24, 1, true, 0, Math.PI),
+      burrowMat,
+    );
+    tunnel.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+    tunnel.position.set(0, 0.12, -0.12);
+    tunnel.scale.y = 0.82;
+    group.add(tunnel);
+
+    const glow = new THREE.Mesh(new THREE.RingGeometry(0.48, 0.72, 32), glowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.012;
+    group.add(glow);
 
     return group;
   }
@@ -2651,6 +2721,19 @@ export class MouseRace3D {
       }
     }
 
+    for (const hole of this.maze.mouseHoles) {
+      if (!hole.active) continue;
+      hole.mesh.rotation.y += 0.012;
+      const glow = hole.mesh.children[hole.mesh.children.length - 1];
+      if (glow) {
+        const pulse = 0.9 + Math.sin(now * 0.004 + hole.position.x) * 0.08;
+        glow.scale.set(pulse, pulse, pulse);
+      }
+      if (this.player.position.distanceToSquared(hole.position) < 0.72 * 0.72) {
+        this.teleportFromMouseHole(hole);
+      }
+    }
+
     for (const key of this.maze.cheeseKeys) {
       if (!key.active) continue;
       key.mesh.rotation.y += 0.035;
@@ -2949,6 +3032,23 @@ export class MouseRace3D {
     this.player.position.set(pair.position.x, 0.3, pair.position.z);
     this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.22);
     this.flashHint("✨ Whoosh! The gem teleported you!");
+    this.audio.playGem();
+  }
+
+  private teleportFromMouseHole(hole: MazePickup): void {
+    if (performance.now() < this.mouseHoleCooldownUntil || hole.pairIndex === undefined) {
+      return;
+    }
+
+    const pair = this.maze.mouseHoles[hole.pairIndex];
+    if (!pair) {
+      return;
+    }
+
+    this.mouseHoleCooldownUntil = performance.now() + 900;
+    this.player.position.set(pair.position.x, 0.3, pair.position.z);
+    this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.14);
+    this.flashHint("🐭 Shortcut! You slipped through a mouse hole!");
     this.audio.playGem();
   }
 
@@ -3382,6 +3482,7 @@ export class MouseRace3D {
     this.catPatrolIndex = 0;
     this.aliceElapsedMs = 0;
     this.gemCooldownUntil = 0;
+    this.mouseHoleCooldownUntil = 0;
     this.cheeseLockHintUntil = 0;
     this.catChasing = false;
     this.hud.vignette.classList.remove("active");
@@ -3541,6 +3642,7 @@ export class MouseRace3D {
       remainingCrumbs: this.maze?.crumbs.filter((item) => item.active).length ?? 0,
       remainingGreenCrumbs: this.maze?.crumbs.filter((item) => item.active && item.guideCrumb).length ?? 0,
       remainingGems: this.maze?.gems.filter((item) => item.active).length ?? 0,
+      mouseHolePairs: this.maze?.mouseHoles.map((hole, index) => `${index}->${hole.pairIndex ?? "none"}`) ?? [],
       remainingCheeseKeys: this.maze?.cheeseKeys.filter((item) => item.active).length ?? 0,
       requiredCheeseKeysLeft: this.maze ? this.remainingRequiredCheeseKeys() : 0,
       scoutPeeks: this.scoutPeeks,
