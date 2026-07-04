@@ -31,6 +31,7 @@
           </div>
           <div class="hud-right">
             <button id="scout-btn" class="hud-button" type="button" aria-label="Use scout view">🔭1</button>
+            <button id="home-btn" class="hud-button" type="button" aria-label="Back to menu">🏠</button>
             <button id="mute-btn" class="hud-button" type="button" aria-label="Toggle sound">🔊</button>
             <button id="fullscreen-btn" class="hud-button" type="button" aria-label="Toggle fullscreen">⛶</button>
           </div>
@@ -55,23 +56,28 @@
                   <span class="maze-icon">📦</span>
                   <strong>Cardboard</strong>
                   <span>Cheese Run</span>
+                  <span class="maze-best hidden"></span>
                 </button>
                 <button class="maze-btn" type="button" data-maze="1" aria-pressed="false">
                   <span class="maze-icon">🪨</span>
                   <strong>Ancient</strong>
                   <span>Catacombs</span>
+                  <span class="maze-best hidden"></span>
                 </button>
                 <button class="maze-btn" type="button" data-maze="2" aria-pressed="false">
                   <span class="maze-icon">🌿</span>
                   <strong>Jungle</strong>
                   <span>Ruins</span>
+                  <span class="maze-best hidden"></span>
                 </button>
                 <button class="maze-btn" type="button" data-maze="3" aria-pressed="false">
                   <span class="maze-icon">🚀</span>
                   <strong>Galactic</strong>
                   <span>Gouda Hunt</span>
+                  <span class="maze-best hidden"></span>
                 </button>
               </div>
+              <div id="maze-hint" class="maze-hint hidden" role="status"></div>
             </div>
             <div class="picker-section">
               <div class="picker-label">Difficulty</div>
