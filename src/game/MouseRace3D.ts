@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { LEVELS, LevelDefinition, NOISY_TILE_SYMBOL, NoisyTilePlacement } from "./levels";
+import { LEVELS, LevelDefinition, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
@@ -18,6 +18,7 @@ type DifficultySettings = {
   startingLives: number;
   extraLifeCrumbs: number;
   greenCrumbInterval: number;
+  gateCycleMs: number;
   requiredKeyLimit?: number;
   forgivingHits: boolean;
 };
@@ -49,6 +50,8 @@ type MazeNoisyTile = {
   mesh: THREE.Object3D;
   position: THREE.Vector3;
   lastTriggeredMs: number;
+};
+
 type MazeDoor = {
   mesh: THREE.Object3D;
   position: THREE.Vector3;
@@ -62,6 +65,16 @@ type MazePlate = {
   mesh: THREE.Object3D;
   position: THREE.Vector3;
   active: boolean;
+};
+
+type MazeGate = {
+  mesh: THREE.Object3D;
+  position: THREE.Vector3;
+  orientation: "horizontal" | "vertical";
+  phase: number;
+  rect: WallRect;
+};
+
 type MazeBlock = {
   mesh: THREE.Object3D;
   row: number;
@@ -83,6 +96,7 @@ type MazeState = {
   noisyTiles: MazeNoisyTile[];
   doors: MazeDoor[];
   plates: MazePlate[];
+  gates: MazeGate[];
   blocks: MazeBlock[];
   gems: MazePickup[];
   mouseHoles: MazePickup[];
@@ -121,6 +135,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     startingLives: 5,
     extraLifeCrumbs: 2,
     greenCrumbInterval: 4,
+    gateCycleMs: 5200,
     requiredKeyLimit: 1,
     forgivingHits: true,
   },
@@ -132,6 +147,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     startingLives: 4,
     extraLifeCrumbs: 3,
     greenCrumbInterval: 7,
+    gateCycleMs: 4200,
     requiredKeyLimit: 2,
     forgivingHits: false,
   },
@@ -143,6 +159,7 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     startingLives: 3,
     extraLifeCrumbs: 3,
     greenCrumbInterval: 11,
+    gateCycleMs: 3300,
     forgivingHits: false,
   },
 };
@@ -660,6 +677,7 @@ export class MouseRace3D {
     const noisyTiles: MazeNoisyTile[] = [];
     const doors: MazeDoor[] = [];
     const plates: MazePlate[] = [];
+    const gates: MazeGate[] = [];
     const blocks: MazeBlock[] = [];
     const gems: MazePickup[] = [];
     const mouseHoles: MazePickup[] = [];
@@ -1016,6 +1034,53 @@ export class MouseRace3D {
           noisyTile.rotation.y = ((row + col) % 4) * (Math.PI / 2);
           group.add(noisyTile);
           noisyTiles.push({ mesh: noisyTile, position: noisyTile.position.clone(), lastTriggeredMs: -Infinity });
+          return;
+        }
+
+        if (cell === ROTATING_GATE_SYMBOL) {
+          const orientation = map[row]?.[col - 1] !== "#" || map[row]?.[col + 1] !== "#" ? "horizontal" : "vertical";
+          const gateLength = this.tileSize * 0.94;
+          const gateThickness = this.tileSize * 0.16;
+          const gateHeight = Math.max(0.68, wallHeight * 0.5);
+          const gate = new THREE.Group();
+          const hinge = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.12, 0.12, gateHeight + 0.24, 18),
+            new THREE.MeshStandardMaterial({ color: level.theme.trim, roughness: 0.45, metalness: 0.35 }),
+          );
+          hinge.position.y = gateHeight * 0.5;
+          hinge.castShadow = true;
+          gate.add(hinge);
+
+          const bar = new THREE.Mesh(
+            new THREE.BoxGeometry(gateLength, gateHeight, gateThickness),
+            new THREE.MeshStandardMaterial({
+              color: level.theme.accent,
+              emissive: level.theme.accent,
+              emissiveIntensity: 0.24,
+              roughness: 0.5,
+              metalness: level.theme.wallStyle === "metal" ? 0.58 : 0.12,
+            }),
+          );
+          bar.position.y = gateHeight * 0.5;
+          bar.castShadow = true;
+          bar.receiveShadow = true;
+          gate.add(bar);
+
+          const warning = new THREE.Mesh(
+            new THREE.RingGeometry(0.45, 0.6, 28),
+            new THREE.MeshBasicMaterial({ color: level.theme.accent, transparent: true, opacity: 0.26, side: THREE.DoubleSide, depthWrite: false }),
+          );
+          warning.rotation.x = -Math.PI / 2;
+          warning.position.y = 0.018;
+          gate.add(warning);
+
+          gate.position.set(x, 0.02, z);
+          gate.rotation.y = orientation === "horizontal" ? 0 : Math.PI / 2;
+          group.add(gate);
+          const rect = this.gateRect(gate.position, gate.rotation.y, gateLength, gateThickness);
+          gates.push({ mesh: gate, position: gate.position.clone(), orientation, phase: ((row * 17 + col * 11) % 100) / 100, rect });
+          return;
+        }
 
         if (cell === "B") {
           const block = this.buildCheeseBlock();
@@ -1134,6 +1199,7 @@ export class MouseRace3D {
       noisyTiles,
       doors,
       plates,
+      gates,
       blocks,
       gems,
       mouseHoles,
@@ -2558,6 +2624,10 @@ export class MouseRace3D {
     const now = performance.now();
     const scoutActive = this.isScoutPeekActive();
 
+    if (this.maze) {
+      this.updateGates(now);
+    }
+
     if (!this.isOverlayOpen() && !this.paused && this.maze && !scoutActive) {
       this.updatePlayer(delta, now);
       this.updateCat(delta, now);
@@ -2759,6 +2829,34 @@ export class MouseRace3D {
     }
   }
 
+  private updateGates(now: number): void {
+    const gateLength = this.tileSize * 0.94;
+    const gateThickness = this.tileSize * 0.16;
+    const cycleMs = DIFFICULTY_SETTINGS[this.difficulty].gateCycleMs;
+
+    for (const gate of this.maze.gates) {
+      const cycle = ((now / cycleMs + gate.phase) % 1 + 1) % 1;
+      const swing = Math.sin(cycle * Math.PI * 2);
+      const baseAngle = gate.orientation === "horizontal" ? 0 : Math.PI / 2;
+      const angle = baseAngle + swing * (Math.PI / 2);
+      gate.mesh.rotation.y = angle;
+      gate.rect = this.gateRect(gate.position, angle, gateLength, gateThickness);
+    }
+  }
+
+  private gateRect(position: THREE.Vector3, angle: number, length: number, thickness: number): WallRect {
+    const cos = Math.abs(Math.cos(angle));
+    const sin = Math.abs(Math.sin(angle));
+    const halfX = length * 0.5 * cos + thickness * 0.5 * sin;
+    const halfZ = length * 0.5 * sin + thickness * 0.5 * cos;
+    return {
+      minX: position.x - halfX,
+      maxX: position.x + halfX,
+      minZ: position.z - halfZ,
+      maxZ: position.z + halfZ,
+    };
+  }
+
   private blockRect(block: MazeBlock): WallRect {
     const halfSize = this.tileSize * 0.4;
     return {
@@ -2820,6 +2918,11 @@ export class MouseRace3D {
       if (door.open) continue;
       if (Math.abs(door.position.x - x) <= this.tileSize * 1.5 && Math.abs(door.position.z - z) <= this.tileSize * 1.5) {
         result.push(door.rect);
+      }
+    }
+    for (const gate of maze.gates) {
+      if (Math.abs(gate.position.x - x) <= this.tileSize * 1.5 && Math.abs(gate.position.z - z) <= this.tileSize * 1.5) {
+        result.push(gate.rect);
       }
     }
     return result;
@@ -2894,7 +2997,6 @@ export class MouseRace3D {
     return !!this.catInvestigateTarget && now < this.catInvestigateUntil;
   }
 
-  private updatePickups(_delta: number, now: number): void {
   private updatePickups(delta: number, now: number): void {
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;
@@ -2949,6 +3051,8 @@ export class MouseRace3D {
         this.flashHint("🔔 Oops, noisy floor! The cat is coming to check!", true);
         this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.08);
       }
+    }
+
     const anyPlatePressed = this.maze.plates.some((plate) => {
       const pressed = this.player.position.distanceToSquared(plate.position) < 0.78 * 0.78;
       plate.active = pressed;
