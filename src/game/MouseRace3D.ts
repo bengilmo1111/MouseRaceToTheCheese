@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { BREAKABLE_WALL_SYMBOL, LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL } from "./levels";
+import { BREAKABLE_WALL_SYMBOL, LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL, THEMED_TILE_SYMBOL } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
 import { AudioBus } from "./audio";
 
@@ -100,6 +100,19 @@ type MazeBreakableWall = {
   active: boolean;
 };
 
+type ThemeTileKind = "flap" | "cracked" | "vine" | "conveyor";
+
+type MazeThemeTile = {
+  mesh: THREE.Group;
+  position: THREE.Vector3;
+  row: number;
+  col: number;
+  kind: ThemeTileKind;
+  used: boolean;
+  triggeredAtMs?: number;
+  direction?: THREE.Vector3;
+};
+
 type MazeState = {
   map: string[];
   originX: number;
@@ -118,6 +131,7 @@ type MazeState = {
   gates: MazeGate[];
   blocks: MazeBlock[];
   breakableWalls: MazeBreakableWall[];
+  themeTiles: MazeThemeTile[];
   gems: MazePickup[];
   mouseHoles: MazePickup[];
   cheeseKeys: MazePickup[];
@@ -705,6 +719,7 @@ export class MouseRace3D {
     const gates: MazeGate[] = [];
     const blocks: MazeBlock[] = [];
     const breakableWalls: MazeBreakableWall[] = [];
+    const themeTiles: MazeThemeTile[] = [];
     const gems: MazePickup[] = [];
     const mouseHoles: MazePickup[] = [];
     const cheeseKeys: MazePickup[] = [];
@@ -1109,6 +1124,23 @@ export class MouseRace3D {
           return;
         }
 
+        if (cell === THEMED_TILE_SYMBOL) {
+          const kind = this.themeTileKind(level);
+          const themedTile = this.buildThemeTile(level, kind, row, col);
+          themedTile.position.set(x, 0.028, z);
+          group.add(themedTile);
+          themeTiles.push({
+            mesh: themedTile,
+            position: new THREE.Vector3(x, 0.08, z),
+            row,
+            col,
+            kind,
+            used: false,
+            direction: kind === "conveyor" ? new THREE.Vector3((row + col) % 2 === 0 ? 1 : -1, 0, 0) : undefined,
+          });
+          return;
+        }
+
         if (cell === NOISY_TILE_SYMBOL) {
           const noisyTile = this.buildNoisyTile(level);
           noisyTile.position.set(x, 0.035, z);
@@ -1284,6 +1316,7 @@ export class MouseRace3D {
       gates,
       blocks,
       breakableWalls,
+      themeTiles,
       gems,
       mouseHoles,
       cheeseKeys,
@@ -1302,9 +1335,99 @@ export class MouseRace3D {
     return !!cell && cell !== "#" && cell !== BREAKABLE_WALL_SYMBOL;
   }
 
+  private themeTileKind(level: LevelDefinition): ThemeTileKind {
+    if (level.theme.name === "Cardboard") return "flap";
+    if (level.theme.name === "Jungle") return "vine";
+    if (level.theme.name === "Space") return "conveyor";
+    return "cracked";
+  }
+
+  private injectThemeTile(level: LevelDefinition): string[] {
+    const preferred: Record<string, { row: number; col: number }> = {
+      Cardboard: { row: 1, col: 3 },
+      Stone: { row: 3, col: 5 },
+      Jungle: { row: 7, col: 4 },
+      Space: { row: 1, col: 3 },
+    };
+    const map = [...level.map];
+    const place = (row: number, col: number): boolean => {
+      const line = map[row];
+      if (!line || !this.isOpenMapCell(line[col]) || line[col] === THEMED_TILE_SYMBOL) return false;
+      const cells = [...line];
+      cells[col] = THEMED_TILE_SYMBOL;
+      map[row] = cells.join("");
+      return true;
+    };
+
+    const target = preferred[level.theme.name];
+    if (target && place(target.row, target.col)) return map;
+
+    for (let row = 1; row < map.length - 1; row += 1) {
+      for (let col = 1; col < map[row].length - 1; col += 1) {
+        if (place(row, col)) return map;
+      }
+    }
+    return map;
+  }
+
+  private buildThemeTile(level: LevelDefinition, kind: ThemeTileKind, row: number, col: number): THREE.Group {
+    const group = new THREE.Group();
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(this.tileSize * 0.72, 0.06, this.tileSize * 0.72),
+      new THREE.MeshStandardMaterial({
+        color: kind === "vine" ? 0x2fd15d : kind === "conveyor" ? 0x42e8ff : level.theme.accent,
+        emissive: kind === "cracked" ? level.theme.hazard : level.theme.accent,
+        emissiveIntensity: kind === "cracked" ? 0.22 : 0.16,
+        roughness: kind === "conveyor" ? 0.28 : 0.76,
+        metalness: kind === "conveyor" ? 0.45 : 0.04,
+        transparent: true,
+        opacity: 0.9,
+      }),
+    );
+    base.receiveShadow = true;
+    group.add(base);
+
+    const markMaterial = new THREE.MeshBasicMaterial({
+      color: kind === "cracked" ? level.theme.hazard : level.theme.trim,
+      transparent: true,
+      opacity: 0.62,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.58, 28), markMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    group.add(ring);
+
+    if (kind === "conveyor" || kind === "flap") {
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.64, 3), markMaterial.clone());
+      arrow.rotation.x = -Math.PI / 2;
+      arrow.rotation.z = kind === "conveyor" && (row + col) % 2 !== 0 ? Math.PI / 2 : -Math.PI / 2;
+      arrow.position.y = 0.07;
+      group.add(arrow);
+    } else if (kind === "cracked") {
+      for (let i = 0; i < 3; i += 1) {
+        const crack = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.025, 0.88 - i * 0.18), markMaterial.clone());
+        crack.position.set((i - 1) * 0.28, 0.08, 0);
+        crack.rotation.y = (i - 1) * 0.55;
+        group.add(crack);
+      }
+    } else {
+      for (let i = 0; i < 4; i += 1) {
+        const vine = new THREE.Mesh(new THREE.TorusGeometry(0.26 + i * 0.06, 0.025, 8, 18), markMaterial.clone());
+        vine.rotation.x = -Math.PI / 2;
+        vine.rotation.z = i * 0.8;
+        vine.position.y = 0.08 + i * 0.004;
+        group.add(vine);
+      }
+    }
+    return group;
+  }
+
   private resolveLevelMap(level: LevelDefinition): string[] {
+    let map = this.injectThemeTile(level);
     if (!level.noisyTiles?.length) {
-      return level.map;
+      return map;
     }
 
     const noisyTilesByRow = new Map<number, NoisyTilePlacement[]>();
@@ -1314,7 +1437,7 @@ export class MouseRace3D {
       noisyTilesByRow.set(tile.row, rowTiles);
     });
 
-    return level.map.map((line, row) => {
+    return map.map((line, row) => {
       const noisyTiles = noisyTilesByRow.get(row);
       if (!noisyTiles?.length) {
         return line;
@@ -2891,7 +3014,8 @@ export class MouseRace3D {
     this.turnRate = THREE.MathUtils.lerp(this.turnRate, desiredTurnRate, Math.min(1, delta * 8));
     this.playerHeading += this.turnRate * delta;
 
-    this.targetSpeed = this.moveSpeed * forwardInput * (forwardInput < 0 ? 0.55 : 1);
+    const tileSpeedMultiplier = this.getThemeTileSpeedMultiplier();
+    this.targetSpeed = this.moveSpeed * tileSpeedMultiplier * forwardInput * (forwardInput < 0 ? 0.55 : 1);
     const accelRate = forwardInput !== 0 ? this.accel : this.decel;
     this.currentSpeed = THREE.MathUtils.lerp(
       this.currentSpeed,
@@ -2917,6 +3041,8 @@ export class MouseRace3D {
     } else {
       this.footstepAccum = 0;
     }
+
+    this.applyThemeTileForces(delta, now);
 
     const targetBank = THREE.MathUtils.clamp(-this.turnRate * 0.25, -0.35, 0.35);
     this.bankAngle = THREE.MathUtils.lerp(this.bankAngle, targetBank, Math.min(1, delta * 8));
@@ -3044,6 +3170,75 @@ export class MouseRace3D {
     this.flashHint(message);
     this.refreshHud();
     this.refreshScoutButton();
+  }
+
+  private getThemeTileSpeedMultiplier(): number {
+    const onVine = this.maze.themeTiles.some(
+      (tile) => tile.kind === "vine" && this.player.position.distanceToSquared(tile.position) < 0.95 * 0.95,
+    );
+    if (!onVine) return 1;
+    return this.difficulty === "easy" ? 0.78 : this.difficulty === "medium" ? 0.64 : 0.52;
+  }
+
+  private applyThemeTileForces(delta: number, now: number): void {
+    for (const tile of this.maze.themeTiles) {
+      if (this.player.position.distanceToSquared(tile.position) >= 0.9 * 0.9) continue;
+      if (tile.kind === "conveyor" && tile.direction) {
+        const force = (this.difficulty === "easy" ? 1.25 : this.difficulty === "medium" ? 1.75 : 2.2) * delta;
+        this._tmpVec.copy(tile.direction).multiplyScalar(force);
+        this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this._tmpVec, true);
+        if (now % 900 < 40) this.flashHint("🛸 Force tile is pushing you!");
+      } else if (tile.kind === "flap") {
+        const westSide = this.player.position.x < tile.position.x - 0.08;
+        if (westSide) {
+          this._tmpVec.set(2.4 * delta, 0, 0);
+          this.moveWithCollisions(this.player.position, PLAYER_RADIUS, this._tmpVec, true);
+          tile.mesh.rotation.z = THREE.MathUtils.lerp(tile.mesh.rotation.z, -0.7, Math.min(1, delta * 10));
+          if (!tile.used) {
+            tile.used = true;
+            this.flashHint("📦 One-way cardboard flap — it only swings forward!");
+          }
+        } else if (Math.abs(this.player.position.x - tile.position.x) < 0.42) {
+          this.player.position.x = tile.position.x + 0.55;
+          tile.mesh.rotation.z = THREE.MathUtils.lerp(tile.mesh.rotation.z, 0.25, Math.min(1, delta * 12));
+        }
+      }
+    }
+  }
+
+  private updateThemeTiles(delta: number, now: number): void {
+    const collapseDelay = this.difficulty === "easy" ? 1700 : this.difficulty === "medium" ? 1150 : 800;
+    for (const tile of this.maze.themeTiles) {
+      tile.mesh.rotation.y += tile.kind === "conveyor" ? delta * 2.2 : tile.kind === "vine" ? delta * 0.55 : 0;
+      if (tile.kind === "flap" && this.player.position.distanceToSquared(tile.position) >= 1.2 * 1.2) {
+        tile.mesh.rotation.z = THREE.MathUtils.lerp(tile.mesh.rotation.z, 0, Math.min(1, delta * 4));
+      }
+      if (tile.kind !== "cracked" || tile.used) continue;
+      if (this.player.position.distanceToSquared(tile.position) < 0.86 * 0.86 && tile.triggeredAtMs === undefined) {
+        tile.triggeredAtMs = now;
+        this.flashHint(this.difficulty === "easy" ? "⚠️ Cracked stone! You have extra time to scurry off." : "⚠️ Cracked tile collapsing!", true);
+        this.cameraShakeAmp = Math.max(this.cameraShakeAmp, 0.04);
+      }
+      if (tile.triggeredAtMs !== undefined) {
+        const progress = Math.min(1, (now - tile.triggeredAtMs) / collapseDelay);
+        tile.mesh.position.y = 0.028 - progress * 0.18;
+        tile.mesh.scale.setScalar(1 + progress * 0.12);
+        tile.mesh.traverse((object) => {
+          const material = (object as Partial<THREE.Mesh>).material;
+          if (material && !Array.isArray(material) && "opacity" in material) {
+            (material as THREE.Material & { opacity: number }).opacity = 0.9 - progress * 0.46;
+          }
+        });
+        if (progress >= 1) {
+          tile.used = true;
+          const hazard = this.buildLavaPit();
+          hazard.position.set(tile.position.x, 0.012, tile.position.z);
+          this.maze.levelGroup.add(hazard);
+          this.maze.traps.push({ mesh: hazard, position: tile.position.clone(), row: tile.row, col: tile.col, kind: "lava" });
+          this.spawnPickupBurst(tile.position, LEVELS[this.levelIndex].theme.hazard, 700);
+        }
+      }
+    }
   }
 
   private updateGates(now: number): void {
@@ -3233,6 +3428,7 @@ export class MouseRace3D {
 
   private updatePickups(delta: number, now: number): void {
     this.updateMovingHazards(now);
+    this.updateThemeTiles(delta, now);
 
     for (const crumb of this.maze.crumbs) {
       if (!crumb.active) continue;

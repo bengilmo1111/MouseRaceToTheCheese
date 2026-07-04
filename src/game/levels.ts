@@ -50,6 +50,7 @@ export const NOISY_TILE_SYMBOL = "N";
 export const ROTATING_GATE_SYMBOL = "R";
 export const MOVING_HAZARD_SYMBOL = "M";
 export const BREAKABLE_WALL_SYMBOL = "X";
+export const THEMED_TILE_SYMBOL = "Y";
 
 export const LEVELS: LevelDefinition[] = [
   {
