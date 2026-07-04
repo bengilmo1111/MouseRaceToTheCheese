@@ -40,6 +40,37 @@ export type LevelDefinition = {
   map: string[];
 };
 
+type NoisyTilePlacement = {
+  row: number;
+  col: number;
+};
+
+const NOISY_TILE_SYMBOL = "N";
+
+const withNoisyTiles = (map: string[], placements: NoisyTilePlacement[]): string[] => {
+  const placementByRow = new Map<number, NoisyTilePlacement[]>();
+  placements.forEach((placement) => {
+    const rowPlacements = placementByRow.get(placement.row) ?? [];
+    rowPlacements.push(placement);
+    placementByRow.set(placement.row, rowPlacements);
+  });
+
+  return map.map((line, row) => {
+    const rowPlacements = placementByRow.get(row);
+    if (!rowPlacements?.length) {
+      return line;
+    }
+
+    const cells = [...line];
+    rowPlacements.forEach(({ col }) => {
+      if (cells[col] && cells[col] !== "#") {
+        cells[col] = NOISY_TILE_SYMBOL;
+      }
+    });
+    return cells.join("");
+  });
+};
+
 export const LEVELS: LevelDefinition[] = [
   {
     id: 1,
@@ -60,9 +91,9 @@ export const LEVELS: LevelDefinition[] = [
       hud: "#6d471f",
       fog: 0xffe7b5,
     },
-    map: [
+    map: withNoisyTiles([
       "#########################################",
-      "#P  # .   #. T  . # N.  #  .#. .#. ..  .#",
+      "#P  # .   #. T  . # ..  #  .#. .#. ..  .#",
       "### #.#.#.### # ###.#.# # # #.### ### # #",
       "#.# # # #.. #.#   . #.# . #.  # ..# ..#.#",
       "#.#.### ### # #######.#######.# ### ### #",
@@ -102,7 +133,7 @@ export const LEVELS: LevelDefinition[] = [
       "###.#.######### ########### ### # #####.#",
       "# .  .. T. .. ..#  .   .  . .   # .     #",
       "#########################################",
-    ],
+    ], [{ row: 1, col: 20 }]),
   },
   {
     id: 2,
@@ -141,11 +172,11 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 5.6,
       },
     },
-    map: [
+    map: withNoisyTiles([
       "#########################################",
       "#P     .#.... .   .    .# .   ..#     #L#",
       "####### # #.########### ### ###.# ### #.#",
-      "#  .   .# # #   # N ..#.#...#   #.#.#. .#",
+      "#  .   .# # #   #   ..#.#...#   #.#.#. .#",
       "# ####### ### #.# ### #.# ##### # # ###.#",
       "# ..  T.# G.  # #  .# # #T    # ..# .   #",
       "#######.##### # ### # # # ###.##### #####",
@@ -183,7 +214,7 @@ export const LEVELS: LevelDefinition[] = [
       "# #.###.### ##### #.### # # ######### #.#",
       "#  L..     .#.   .      #.. . .  .....#.#",
       "#########################################",
-    ],
+    ], [{ row: 3, col: 18 }]),
   },
   {
     id: 3,
@@ -222,14 +253,14 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 4.8,
       },
     },
-    map: [
+    map: withNoisyTiles([
       "#########################################",
       "#P. # .. .      # .T# ...     #.  #..   #",
       "### #.# ####### #.#.# ###.###.# # # # # #",
       "# # # #.#. .  #.. # #  .#.  #.# #. .# G.#",
       "# #.# #.#.###.##### ### ### ###.#####.# #",
       "#.# # #. .  #.#. .  #  . .# #  .#  .#.# #",
-      "# #.####### #.###N### ##### #.#####.# ###",
+      "# #.####### #.###.### ##### #.#####.# ###",
       "#.#  . .# # #. .#   # . # . #. .  ..#~  #",
       "# #####.#.# ### # ##### #.#########.### #",
       "#   . # #   T # #W#  ~..# #. .#   #.. # #",
@@ -264,7 +295,7 @@ export const LEVELS: LevelDefinition[] = [
       "# # # #.# # # # # ### #####K##### # # # #",
       "#T#  .  # T  .# #... .   .  #~   ..G#.  #",
       "#########################################",
-    ],
+    ], [{ row: 6, col: 17 }]),
   },
   {
     id: 4,
@@ -303,7 +334,7 @@ export const LEVELS: LevelDefinition[] = [
         playerLightIntensity: 6.4,
       },
     },
-    map: [
+    map: withNoisyTiles([
       "#########################################",
       "#P. . . . . . . . . . . . . . . . . . . #",
       "#.### ###.### ###.### ###.### ###.### #.#",
@@ -313,7 +344,7 @@ export const LEVELS: LevelDefinition[] = [
       "# ###.### ###.### ###.### ###.### ###.# #",
       "#.### #. .### #. .### #. .### #. .### #.#",
       "# ###.# . ###.# . ###.# . ###.# . ###.# #",
-      "#. . . G. .G . . . . N . . . . . . . . .#",
+      "#. . . G. .G . . . . . . . . . . . . . .#",
       "# ###.### ###.### ###.### ###.### ###.# #",
       "#.# . ###.# . ###.### ###.# . ###.# . #.#",
       "# #. .### #. .### ###.### #. .### #. .# #",
@@ -345,6 +376,6 @@ export const LEVELS: LevelDefinition[] = [
       "#.### ###.### ###.### ###.### ###.### #.#",
       "# . . . . . . . . . . . . . . . . . . .W#",
       "#########################################",
-    ],
+    ], [{ row: 9, col: 21 }]),
   },
 ];
