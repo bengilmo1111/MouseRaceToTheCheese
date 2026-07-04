@@ -6,6 +6,21 @@ import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
 const DIFFICULTY_KEY = "mouseRace.difficulty";
+const PROGRESS_KEY = "mouseRace.progress.v1";
+
+interface ProgressData {
+  /** Number of mazes playable from the picker (1 = only the first). */
+  unlocked: number;
+  /** Best completion time in ms, keyed by level id. */
+  best: Record<string, number>;
+}
+
+function formatRaceTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 type ControlKey = "up" | "down" | "left" | "right";
 type DifficultyKey = "easy" | "medium" | "hard";
@@ -320,12 +335,39 @@ export class MouseRace3D {
   private lastDistanceText = "";
   private lastStatusSignature = "";
   private introJustShown = false;
+  private progress: ProgressData = MouseRace3D.loadProgress();
+
+  private static loadProgress(): ProgressData {
+    try {
+      const raw = localStorage.getItem(PROGRESS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<ProgressData>;
+        return {
+          unlocked: Math.min(LEVELS.length, Math.max(1, Number(parsed.unlocked) || 1)),
+          best: typeof parsed.best === "object" && parsed.best !== null ? parsed.best : {},
+        };
+      }
+    } catch {
+      // Corrupt or unavailable storage — fall through to a fresh start.
+    }
+    return { unlocked: 1, best: {} };
+  }
+
+  private saveProgress(): void {
+    try {
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify(this.progress));
+    } catch {
+      // Storage may be unavailable (private browsing); progression just won't persist.
+    }
+  }
   private guideTrail?: THREE.Group;
   private guideTrailUntil = 0;
   private guideTrailTarget = "";
   private readonly pickupBursts: { mesh: THREE.Points; ageMs: number; lifeMs: number }[] = [];
 
   private readonly startScreen = this.must<HTMLDivElement>("start-screen");
+  private readonly mazeHint = this.must<HTMLDivElement>("maze-hint");
+  private mazeButtons: HTMLButtonElement[] = [];
   private readonly overlay = {
     root: this.must<HTMLDivElement>("overlay"),
     title: this.must<HTMLHeadingElement>("overlay-title"),
@@ -451,6 +493,7 @@ export class MouseRace3D {
     };
     this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", toggleFullscreen);
     this.must<HTMLButtonElement>("start-fullscreen-btn").addEventListener("click", toggleFullscreen);
+    this.must<HTMLButtonElement>("home-btn").addEventListener("click", () => this.returnToMenu());
 
     const muteBtn = this.must<HTMLButtonElement>("mute-btn");
     const refreshMuteIcon = (): void => {
@@ -581,23 +624,59 @@ export class MouseRace3D {
   }
 
   private bindMazePicker(): void {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-maze]"));
+    this.mazeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-maze]"));
     const setMaze = (index: number): void => {
+      if (index >= this.progress.unlocked) {
+        const gateTitle = LEVELS[this.progress.unlocked - 1].title;
+        this.mazeHint.textContent = `🔒 Grab the cheese in ${gateTitle} to unlock this maze!`;
+        this.mazeHint.classList.remove("hidden");
+        const button = this.mazeButtons[index];
+        button?.classList.remove("shake");
+        void button?.offsetWidth;
+        button?.classList.add("shake");
+        return;
+      }
+
       this.startLevelIndex = index;
-      buttons.forEach((button) => {
+      this.mazeHint.classList.add("hidden");
+      this.mazeButtons.forEach((button) => {
         const isActive = Number(button.dataset.maze) === index;
         button.classList.toggle("active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
       });
     };
 
-    buttons.forEach((button) => {
+    this.mazeButtons.forEach((button) => {
       const index = Number(button.dataset.maze);
       if (isNaN(index) || index < 0 || index >= LEVELS.length) return;
       button.addEventListener("click", () => setMaze(index));
     });
 
+    this.refreshMazePicker();
     setMaze(0);
+  }
+
+  private refreshMazePicker(): void {
+    this.mazeHint.classList.add("hidden");
+    this.mazeButtons.forEach((button) => {
+      const index = Number(button.dataset.maze);
+      if (isNaN(index) || index < 0 || index >= LEVELS.length) return;
+      const locked = index >= this.progress.unlocked;
+      button.classList.toggle("locked", locked);
+      button.setAttribute("aria-disabled", String(locked));
+
+      const bestEl = button.querySelector<HTMLSpanElement>(".maze-best");
+      if (bestEl) {
+        const best = this.progress.best[String(LEVELS[index].id)];
+        bestEl.textContent = locked ? "🔒" : best ? `⭐ ${formatRaceTime(best)}` : "";
+        bestEl.classList.toggle("hidden", !locked && !best);
+      }
+    });
+
+    // If the selected maze got locked out (e.g. progress reset), fall back.
+    if (this.startLevelIndex >= this.progress.unlocked) {
+      this.startLevelIndex = 0;
+    }
   }
 
   private bindPlaytestUi(): void {
@@ -626,6 +705,18 @@ export class MouseRace3D {
       warpCheese: () => this.warpToCheese(),
       warpCat: () => this.warpToCat(),
       warpNearCat: (distance?: number) => this.warpNearCat(distance),
+      completeLevel: () => this.completeLevel(),
+      resetProgress: () => {
+        this.progress = { unlocked: 1, best: {} };
+        this.saveProgress();
+        this.refreshMazePicker();
+      },
+      unlockAll: () => {
+        this.progress.unlocked = LEVELS.length;
+        this.saveProgress();
+        this.refreshMazePicker();
+      },
+      returnToMenu: () => this.returnToMenu(),
       forceHit: () => this.triggerHazard("Forced agent hit."),
       setAliceProgress: (ratio: number) => {
         this.aliceElapsedMs = this.getAliceTimeMs(LEVELS[this.levelIndex]) * Math.max(0, Math.min(1, ratio));
@@ -4446,11 +4537,33 @@ export class MouseRace3D {
     this.levelComplete = true;
     this.audio.playLevelComplete();
     this.spawnCelebration(this.cheese.position);
+
+    // The Alice clock only ticks while the race runs, so it doubles as the
+    // completion stopwatch.
+    const level = LEVELS[this.levelIndex];
+    const raceTime = Math.round(this.aliceElapsedMs);
+    const bestKey = String(level.id);
+    const previousBest = this.progress.best[bestKey];
+    const isNewBest = !previousBest || raceTime < previousBest;
+    if (isNewBest) {
+      this.progress.best[bestKey] = raceTime;
+    }
+
+    let unlockedTitle = "";
+    if (this.levelIndex + 1 < LEVELS.length && this.progress.unlocked < this.levelIndex + 2) {
+      this.progress.unlocked = this.levelIndex + 2;
+      unlockedTitle = LEVELS[this.levelIndex + 1].title;
+    }
+    this.saveProgress();
+    this.refreshMazePicker();
+
+    const timeLine = `⏱️ ${formatRaceTime(raceTime)}${isNewBest ? " — new best! 🏆" : ` (best ${formatRaceTime(this.progress.best[bestKey])})`}`;
+
     if (this.levelIndex === LEVELS.length - 1) {
       this.hasWonGame = true;
       this.showOverlay(
         "🎉 You Win! 🎉",
-        "You beat Alice through every single maze! You are the Cheese Champion! 🧀🏆",
+        `You beat Alice through every single maze! You are the Cheese Champion! 🧀🏆\n${timeLine}`,
         "cheese",
         "Play Again",
       );
@@ -4459,10 +4572,26 @@ export class MouseRace3D {
 
     this.showOverlay(
       "🧀 Cheese! 🎉",
-      "You got the cheese before Alice! Ready for the next maze?",
+      `You got the cheese before Alice!\n${timeLine}${unlockedTitle ? `\n🔓 New maze unlocked: ${unlockedTitle}!` : ""}`,
       "cheese",
       "Next Maze ➜",
     );
+  }
+
+  private returnToMenu(): void {
+    // The start screen counts as an open overlay, so the sim freezes; the
+    // next Start Race begins a fresh run via startRun(true).
+    this.paused = false;
+    this.overlay.root.classList.add("hidden");
+    this.hud.root.classList.add("hidden");
+    this.hud.toast.classList.add("hidden");
+    this.hud.vignette.classList.remove("active");
+    this.hud.timerTrack.classList.remove("danger");
+    (Object.keys(this.controls) as ControlKey[]).forEach((key) => {
+      this.controls[key] = false;
+    });
+    this.refreshMazePicker();
+    this.startScreen.classList.remove("hidden");
   }
 
   private isOverlayOpen(): boolean {
@@ -4703,6 +4832,8 @@ export class MouseRace3D {
       overlayOpen: this.isOverlayOpen(),
       levelComplete: this.levelComplete,
       won: this.hasWonGame,
+      unlockedMazes: this.progress.unlocked,
+      bestTimes: this.progress.best,
       player: {
         x: Number(this.player.position.x.toFixed(2)),
         z: Number(this.player.position.z.toFixed(2)),

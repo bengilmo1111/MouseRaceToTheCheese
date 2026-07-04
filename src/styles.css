@@ -705,6 +705,52 @@ button:focus-visible {
   transform: translateY(-1px);
 }
 
+.maze-btn .maze-best {
+  font-size: 11px;
+  font-weight: 900;
+  color: #a0742e;
+  letter-spacing: 0.04em;
+}
+
+.maze-btn.locked {
+  opacity: 0.55;
+  filter: grayscale(0.75);
+  cursor: not-allowed;
+}
+
+.maze-btn.locked:hover {
+  transform: none;
+  border-color: rgba(112, 69, 21, 0.2);
+}
+
+.maze-btn.locked:hover .maze-icon {
+  transform: none;
+}
+
+.maze-btn.shake {
+  animation: maze-shake 0.4s ease;
+}
+
+@keyframes maze-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}
+
+.maze-hint {
+  margin: 10px auto 0;
+  max-width: 640px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(255, 214, 140, 0.45);
+  border: 2px solid rgba(190, 130, 44, 0.35);
+  color: #7a5218;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .hero-controls {
   margin-bottom: 16px;
   text-align: left;
