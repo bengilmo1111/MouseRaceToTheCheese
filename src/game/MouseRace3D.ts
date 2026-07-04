@@ -285,6 +285,7 @@ export class MouseRace3D {
     tail: THREE.Object3D;
     eyeL: THREE.Object3D;
     eyeR: THREE.Object3D;
+    nose: THREE.Object3D;
   };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
@@ -304,6 +305,7 @@ export class MouseRace3D {
   private lastGuideLabel = "";
   private lastDistanceText = "";
   private lastStatusSignature = "";
+  private introJustShown = false;
   private guideTrail?: THREE.Group;
   private guideTrailUntil = 0;
   private guideTrailTarget = "";
@@ -1469,14 +1471,23 @@ export class MouseRace3D {
     const blushMat = new THREE.MeshStandardMaterial({ color: 0xff9bbf, roughness: 0.7, transparent: true, opacity: 0.55 });
     const pawMat = new THREE.MeshStandardMaterial({ color: 0xf3a8c0, roughness: 0.6 });
     const mouthMat = new THREE.MeshStandardMaterial({ color: 0x3a2228, roughness: 0.4 });
-    const whiskerMat = new THREE.LineBasicMaterial({ color: 0x2a2530, transparent: true, opacity: 0.55 });
+    const whiskerMat = new THREE.MeshBasicMaterial({ color: 0x2a2530, transparent: true, opacity: 0.65 });
     const tailMat = new THREE.MeshStandardMaterial({ color: 0xeea3b8, roughness: 0.5 });
 
+    // Pear-shaped body: rump-heavy like a real mouse, tapering toward the head.
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.45, 22, 22), fur);
     body.scale.set(1.08, 0.94, 1.45);
     body.position.y = 0.06;
     body.castShadow = true;
     group.add(body);
+
+    for (const side of [-1, 1]) {
+      const haunch = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 16), fur);
+      haunch.scale.set(0.85, 0.9, 1.05);
+      haunch.position.set(side * 0.3, -0.04, 0.3);
+      haunch.castShadow = true;
+      group.add(haunch);
+    }
 
     const belly = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 18), bellyMat);
     belly.scale.set(0.9, 0.7, 1.32);
@@ -1485,25 +1496,33 @@ export class MouseRace3D {
 
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 22, 22), fur);
     head.position.set(0, 0.22, -0.52);
-    head.scale.set(1.08, 1.02, 1.05);
+    head.scale.set(1.02, 0.98, 1.12);
     head.castShadow = true;
     group.add(head);
 
+    // Longer, pointier snout — the wedge profile is what reads "mouse".
     const snout = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 14), bellyMat);
-    snout.scale.set(0.95, 0.72, 1.1);
-    snout.position.set(0, 0.08, -0.82);
+    snout.scale.set(0.82, 0.66, 1.5);
+    snout.position.set(0, 0.08, -0.84);
     group.add(snout);
 
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), noseMat);
-    nose.position.set(0, 0.11, -0.95);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 12), noseMat);
+    nose.position.set(0, 0.1, -1.08);
     group.add(nose);
+
+    // Tiny buck teeth under the nose.
+    for (const side of [-1, 1]) {
+      const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.06, 0.02), sclera);
+      tooth.position.set(side * 0.022, 0.0, -1.05);
+      group.add(tooth);
+    }
 
     const mouth = new THREE.Mesh(
       new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI),
       mouthMat,
     );
     mouth.rotation.set(0, 0, Math.PI);
-    mouth.position.set(0, 0.0, -0.9);
+    mouth.position.set(0, 0.035, -1.02);
     group.add(mouth);
 
     const buildEye = (side: number): THREE.Group => {
@@ -1533,18 +1552,22 @@ export class MouseRace3D {
       group.add(blush);
     }
 
+    // Big round upright ears — the single most "mousey" feature, and the one
+    // the chase camera actually sees. Discs flattened front-to-back so they
+    // read as circles from both behind and in front.
     const buildEar = (side: number): THREE.Group => {
       const earGroup = new THREE.Group();
-      earGroup.position.set(side * 0.22, 0.46, -0.5);
-      const outer = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), fur);
-      outer.scale.set(0.98, 0.4, 1);
+      earGroup.position.set(side * 0.26, 0.56, -0.44);
+      const outer = new THREE.Mesh(new THREE.SphereGeometry(0.21, 18, 18), fur);
+      outer.scale.set(1, 1, 0.34);
       outer.castShadow = true;
       earGroup.add(outer);
-      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 14), earInner);
-      inner.scale.set(0.9, 0.28, 0.95);
-      inner.position.y = 0.04;
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 16), earInner);
+      inner.scale.set(0.88, 0.88, 0.3);
+      inner.position.z = -0.045;
       earGroup.add(inner);
-      earGroup.rotation.z = side * 0.16;
+      earGroup.rotation.z = side * 0.28;
+      earGroup.rotation.x = -0.12;
       return earGroup;
     };
 
@@ -1563,51 +1586,61 @@ export class MouseRace3D {
       backPaw.position.set(side * 0.22, -0.26, 0.28);
       group.add(backPaw);
 
-      const whiskerGeom = new THREE.BufferGeometry();
-      const wx = side * 0.14;
-      const verts: number[] = [];
+      // Lines render 1px and vanish at gameplay distance; thin cylinders
+      // keep the whiskers readable from the chase camera.
       for (let row = 0; row < 3; row += 1) {
-        const angle = (row - 1) * 0.2;
-        verts.push(wx, 0.04 + (row - 1) * 0.05, -0.86);
-        verts.push(side * (0.14 + 0.42 * Math.cos(angle)), 0.04 + (row - 1) * 0.06, -0.86 - 0.34 * Math.sin(angle) - 0.05);
+        const whisker = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.005, 0.42, 5), whiskerMat);
+        whisker.position.set(side * 0.3, 0.06 + (row - 1) * 0.045, -0.92);
+        whisker.rotation.z = side * (Math.PI / 2 - 0.12);
+        whisker.rotation.y = side * (0.35 - row * 0.28);
+        group.add(whisker);
       }
-      whiskerGeom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-      const whiskers = new THREE.LineSegments(whiskerGeom, whiskerMat);
-      group.add(whiskers);
     }
 
+    // Long sinuous tail trailing behind on the ground with the tip flicked
+    // up — from the chase camera this is the mouse's signature.
     const tailGroup = new THREE.Group();
-    tailGroup.position.set(0, 0.02, 0.55);
+    tailGroup.position.set(0, -0.06, 0.58);
     const tailCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0.05, 0.08, 0.26),
-      new THREE.Vector3(-0.05, 0.22, 0.5),
-      new THREE.Vector3(0.04, 0.36, 0.7),
+      new THREE.Vector3(0, 0.04, 0),
+      new THREE.Vector3(0.16, -0.02, 0.28),
+      new THREE.Vector3(-0.18, 0.02, 0.54),
+      new THREE.Vector3(0.1, 0.34, 0.78),
+      new THREE.Vector3(-0.03, 0.78, 0.86),
     ]);
-    const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 24, 0.05, 8, false), tailMat);
+    const tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 32, 0.045, 8, false), tailMat);
     tail.castShadow = true;
     tailGroup.add(tail);
+    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), tailMat);
+    tailTip.position.set(-0.03, 0.78, 0.86);
+    tailGroup.add(tailTip);
     group.add(tailGroup);
 
-    this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR };
+    this.mouseParts = { earL, earR, tail: tailGroup, eyeL, eyeR, nose };
     return group;
   }
 
   private animateMouse(now: number): void {
     if (!this.mouseParts) return;
 
-    const idleWag = Math.sin(now * 0.006) * 0.18;
+    // The tail trails behind along +z, so a yaw sway makes it slither
+    // side-to-side — faster and wider the quicker the mouse scurries.
+    const speedFactor = 1 + Math.min(1.8, Math.abs(this.currentSpeed) * 0.3);
+    const idleWag = Math.sin(now * 0.006 * speedFactor) * 0.16;
     const turnWag = THREE.MathUtils.clamp(-this.turnRate * 0.18, -0.6, 0.6);
-    const speedFactor = 1 + Math.min(1.5, Math.abs(this.currentSpeed) * 0.18);
-    this.mouseParts.tail.rotation.z = (idleWag + turnWag) * speedFactor;
-    this.mouseParts.tail.rotation.y = Math.sin(now * 0.0072 + 0.7) * 0.1 * speedFactor;
+    this.mouseParts.tail.rotation.y = (idleWag + turnWag * 0.5) * speedFactor;
+    this.mouseParts.tail.rotation.z = Math.sin(now * 0.0072 + 0.7) * 0.06 * speedFactor;
 
-    const earBase = 0.16;
+    const earBase = 0.28;
     const twitch = Math.sin(now * 0.011) * 0.06 + (Math.sin(now * 0.0017) > 0.97 ? 0.18 : 0);
     this.mouseParts.earL.rotation.z = -earBase + twitch;
     this.mouseParts.earR.rotation.z = earBase - twitch;
-    this.mouseParts.earL.rotation.x = Math.sin(now * 0.009) * 0.05;
-    this.mouseParts.earR.rotation.x = Math.sin(now * 0.009 + 0.4) * 0.05;
+    this.mouseParts.earL.rotation.x = -0.12 + Math.sin(now * 0.009) * 0.05;
+    this.mouseParts.earR.rotation.x = -0.12 + Math.sin(now * 0.009 + 0.4) * 0.05;
+
+    // Mice sniff constantly — a quick little nose pulse sells it.
+    const sniff = 1 + Math.max(0, Math.sin(now * 0.02)) * 0.22;
+    this.mouseParts.nose.scale.setScalar(sniff);
 
     const blinkPeriod = 3600;
     const phase = (now % blinkPeriod) / blinkPeriod;
@@ -4279,6 +4312,7 @@ export class MouseRace3D {
     this.overlay.title.textContent = title;
     this.overlay.body.textContent = body;
     this.overlay.button.textContent = buttonLabel;
+    this.overlay.title.classList.toggle("celebrate", icon === "cheese");
     if (icon === "alice") {
       this.overlay.icon.src = "/src/Images/file_00000000e9d0720b907b128f233c1f66.png";
       this.overlay.icon.classList.remove("hidden");
@@ -4310,10 +4344,18 @@ export class MouseRace3D {
       this.overlay.root.classList.add("hidden");
       this.levelIndex += 1;
       this.loadLevel(this.levelIndex);
+      this.flashHint(`🏁 ${LEVELS[this.levelIndex].title} — GO! 💨`);
+      this.audio.playGo();
       return;
     }
 
     this.overlay.root.classList.add("hidden");
+    if (this.introJustShown) {
+      this.introJustShown = false;
+      this.flashHint("🏁 GO, MOUSE, GO! 💨");
+      this.audio.playGo();
+      return;
+    }
     this.resetActors();
   }
 
@@ -4335,6 +4377,7 @@ export class MouseRace3D {
     }
 
     this.hasSeenIntro = true;
+    this.introJustShown = true;
     this.showOverlay(
       `${DIFFICULTY_SETTINGS[this.difficulty].label} Race To The Cheese`,
       this.getIntroBody(),

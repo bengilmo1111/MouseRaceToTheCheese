@@ -162,6 +162,10 @@ export class AudioBus {
     this.tone("sine", 300, 520, 0.22, 0.18, 0.01, 0.03);
   }
 
+  playGo(): void {
+    this.arpeggio([392, 523.25, 783.99], 0.09, "square", 0.14);
+  }
+
   playLevelComplete(): void {
     this.arpeggio([523.25, 659.25, 783.99, 1046.5], 0.09, "triangle", 0.28);
   }
