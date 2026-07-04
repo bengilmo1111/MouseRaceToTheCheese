@@ -2542,14 +2542,18 @@ export class MouseRace3D {
     const playerDistance = playerVector.length();
     const baseChaseRange = this.levelIndex === 0 ? 5.0 : this.levelIndex === 1 ? 6.0 : 7.0;
     const chaseRange = baseChaseRange * DIFFICULTY_SETTINGS[this.difficulty].chaseRangeMultiplier;
-    const investigating = !!this.catInvestigateTarget && now < this.catInvestigateUntil;
+    const investigating = this.isCatInvestigating(now);
     const shouldChase = playerDistance < chaseRange && !investigating;
 
     if (shouldChase !== this.catChasing) {
       this.catChasing = shouldChase;
-      this.flashHint(shouldChase ? "🐱 The cat spotted you — run!" : "Phew! The cat lost you. 😅", shouldChase);
-      if (shouldChase) this.audio.playCatAlert();
-      else this.audio.playCatLost();
+      if (shouldChase) {
+        this.flashHint("🐱 The cat spotted you — run!", true);
+        this.audio.playCatAlert();
+      } else if (!investigating) {
+        this.flashHint("Phew! The cat lost you. 😅");
+        this.audio.playCatLost();
+      }
       this.hud.vignette.classList.toggle("active", shouldChase);
     }
 
@@ -2569,6 +2573,13 @@ export class MouseRace3D {
       return;
     }
 
+    if (distance < 0.001) {
+      if (this.player.position.distanceToSquared(this.cat.position) < 0.85 * 0.85) {
+        this.triggerHazard("The cat caught you!");
+      }
+      return;
+    }
+
     const speedScale = shouldChase ? (this.levelIndex === 0 ? 1.05 : this.levelIndex === 1 ? 1.18 : 1.3) : investigating ? 0.98 : 0.85;
     vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
@@ -2579,6 +2590,10 @@ export class MouseRace3D {
     if (this.player.position.distanceToSquared(this.cat.position) < 0.85 * 0.85) {
       this.triggerHazard("The cat caught you!");
     }
+  }
+
+  private isCatInvestigating(now = performance.now()): boolean {
+    return !!this.catInvestigateTarget && now < this.catInvestigateUntil;
   }
 
   private updatePickups(_delta: number, now: number): void {
@@ -3571,7 +3586,13 @@ export class MouseRace3D {
       gemPairs: this.maze?.gems.map((gem, index) => `${index}->${gem.pairIndex ?? "none"}`) ?? [],
       aliceProgress: Number(aliceProgress.toFixed(2)),
       cameraYawDeg: Number(THREE.MathUtils.radToDeg(this.cameraYaw).toFixed(1)),
-      catMode: this.catChasing ? "chasing" : "patrolling",
+      catMode: this.catChasing ? "chasing" : this.isCatInvestigating() ? "investigating" : "patrolling",
+      catInvestigateTarget: this.catInvestigateTarget
+        ? {
+            x: Number(this.catInvestigateTarget.x.toFixed(2)),
+            z: Number(this.catInvestigateTarget.z.toFixed(2)),
+          }
+        : undefined,
       guide: `${this.lastGuideLabel} · ${this.lastDistanceText}m`,
       toast: this.hud.toast.classList.contains("hidden") ? "" : this.hud.toast.textContent,
     };
