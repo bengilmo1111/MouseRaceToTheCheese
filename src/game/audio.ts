@@ -162,6 +162,13 @@ export class AudioBus {
     this.tone("sine", 300, 520, 0.22, 0.18, 0.01, 0.03);
   }
 
+  /** Soft collar-bell jingle; intensity 0..1 scales volume with cat proximity. */
+  playCatBell(intensity: number): void {
+    const level = Math.max(0.04, Math.min(1, intensity));
+    this.tone("sine", 2450 + Math.random() * 300, 2300, 0.14, 0.12 * level, 0.002, 0.012);
+    this.tone("sine", 3800 + Math.random() * 240, 3500, 0.1, 0.055 * level, 0.002, 0.008);
+  }
+
   playGo(): void {
     this.arpeggio([392, 523.25, 783.99], 0.09, "square", 0.14);
   }

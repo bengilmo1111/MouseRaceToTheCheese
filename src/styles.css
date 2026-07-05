@@ -60,6 +60,8 @@ button:focus-visible {
 #game-container {
   position: absolute;
   inset: 0;
+  /* Let map-mode pinch/drag gestures reach the game instead of the browser. */
+  touch-action: none;
 }
 
 #game-container canvas {
@@ -973,8 +975,10 @@ kbd {
   line-height: 1;
 }
 
+/* All touch buttons share one size (playtest feedback: mismatched pads,
+   especially steer vs drive, were hard for small hands). The primary keeps
+   only its brighter background. */
 .touch-btn-primary {
-  height: clamp(86px, 22vw, 117px);
   background: radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 35%), rgba(81, 53, 19, 0.78);
 }
 
@@ -1185,9 +1189,6 @@ kbd {
     border-radius: 18px;
   }
 
-  .touch-btn-primary {
-    height: clamp(58px, 14vw, 68px);
-  }
 }
 
 #playtest-panel {
@@ -1383,10 +1384,6 @@ kbd {
 
   .touch-btn.arrow {
     font-size: clamp(22px, 5vw, 31px);
-  }
-
-  .touch-btn-primary {
-    height: clamp(62px, 14.3vh, 79px);
   }
 
   .touch-row {

@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { BREAKABLE_WALL_SYMBOL, LEVELS, LevelDefinition, MOVING_HAZARD_SYMBOL, NOISY_TILE_SYMBOL, NoisyTilePlacement, ROTATING_GATE_SYMBOL, THEMED_TILE_SYMBOL } from "./levels";
 import bgMusicUrl from "../music/The_Parmesan_Gambit.mp3";
+// Bundled imports: runtime "/src/Images/..." paths 404 in production builds.
+import aliceImageUrl from "../Images/file_00000000e9d0720b907b128f233c1f66.png";
+import cheeseImageUrl from "../Images/cheese_circular_crop.png";
 import { AudioBus } from "./audio";
 
 const MUTE_KEY = "mouseRace.muted";
@@ -182,9 +185,9 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     catSpeedMultiplier: 0.38,
     aliceTimeMultiplier: 2.6,
     chaseRangeMultiplier: 0.68,
-    startingLives: 5,
+    startingLives: 3,
     extraLifeCrumbs: 2,
-    greenCrumbInterval: 4,
+    greenCrumbInterval: 16,
     gateCycleMs: 5200,
     movingHazardSpeedMultiplier: 0.55,
     requiredKeyLimit: 1,
@@ -195,9 +198,9 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     catSpeedMultiplier: 0.72,
     aliceTimeMultiplier: 1.45,
     chaseRangeMultiplier: 0.9,
-    startingLives: 4,
+    startingLives: 3,
     extraLifeCrumbs: 3,
-    greenCrumbInterval: 7,
+    greenCrumbInterval: 28,
     gateCycleMs: 4200,
     movingHazardSpeedMultiplier: 0.85,
     requiredKeyLimit: 2,
@@ -208,9 +211,9 @@ const DIFFICULTY_SETTINGS: Record<DifficultyKey, DifficultySettings> = {
     catSpeedMultiplier: 1,
     aliceTimeMultiplier: 1,
     chaseRangeMultiplier: 1,
-    startingLives: 3,
+    startingLives: 2,
     extraLifeCrumbs: 3,
-    greenCrumbInterval: 11,
+    greenCrumbInterval: 44,
     gateCycleMs: 3300,
     movingHazardSpeedMultiplier: 1.1,
     forgivingHits: false,
@@ -287,6 +290,10 @@ export class MouseRace3D {
   private catChasing = false;
   private catInvestigateTarget?: THREE.Vector3;
   private catInvestigateUntil = 0;
+  private scoutZoom = 1;
+  private scoutPanX = 0;
+  private scoutPanZ = 0;
+  private lastScoutDistance = 60;
   private difficulty: DifficultyKey = DEFAULT_DIFFICULTY;
   private scoutPins: ScoutPin[] = [];
 
@@ -315,6 +322,7 @@ export class MouseRace3D {
   };
   private catStridePhase = 0;
   private catStrideAmp = 0;
+  private catBellAccum = 0;
   private cheeseFx!: { ring: THREE.Mesh; beacon: THREE.Mesh };
   private ambientFx?: {
     points: THREE.Points;
@@ -499,6 +507,7 @@ export class MouseRace3D {
     this.must<HTMLButtonElement>("fullscreen-btn").addEventListener("click", toggleFullscreen);
     this.must<HTMLButtonElement>("start-fullscreen-btn").addEventListener("click", toggleFullscreen);
     this.must<HTMLButtonElement>("home-btn").addEventListener("click", () => this.returnToMenu());
+    this.must<HTMLButtonElement>("pause-btn").addEventListener("click", () => this.togglePause());
 
     const muteBtn = this.must<HTMLButtonElement>("mute-btn");
     const refreshMuteIcon = (): void => {
@@ -595,6 +604,71 @@ export class MouseRace3D {
         releaseAllTouchControls();
       }
     });
+
+    this.bindScoutGestures();
+  }
+
+  // Map mode: drag to pan, pinch or wheel to zoom. Interacting keeps the
+  // peek alive a little longer so the map doesn't vanish mid-inspection.
+  private bindScoutGestures(): void {
+    const pointers = new Map<number, { x: number; y: number }>();
+    let lastPinchDistance = 0;
+
+    const worldPerPixel = (): number =>
+      (2 * this.lastScoutDistance * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) /
+      Math.max(1, this.host.clientHeight);
+
+    const extendPeek = (): void => {
+      this.scoutPeekUntil = Math.max(this.scoutPeekUntil, performance.now() + 8000);
+    };
+
+    this.host.addEventListener(
+      "wheel",
+      (event) => {
+        if (!this.isScoutPeekActive()) return;
+        event.preventDefault();
+        this.scoutZoom = THREE.MathUtils.clamp(this.scoutZoom * Math.exp(-event.deltaY * 0.0012), 0.5, 3.2);
+        extendPeek();
+      },
+      { passive: false },
+    );
+
+    this.host.addEventListener("pointerdown", (event) => {
+      if (!this.isScoutPeekActive()) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      lastPinchDistance = 0;
+      extendPeek();
+    });
+
+    window.addEventListener("pointermove", (event) => {
+      const tracked = pointers.get(event.pointerId);
+      if (!tracked || !this.isScoutPeekActive()) return;
+
+      if (pointers.size === 1) {
+        const wpp = worldPerPixel();
+        this.scoutPanX -= (event.clientX - tracked.x) * wpp;
+        this.scoutPanZ -= (event.clientY - tracked.y) * wpp;
+      }
+      tracked.x = event.clientX;
+      tracked.y = event.clientY;
+
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+        if (lastPinchDistance > 0) {
+          this.scoutZoom = THREE.MathUtils.clamp(this.scoutZoom * (distance / lastPinchDistance), 0.5, 3.2);
+        }
+        lastPinchDistance = distance;
+        extendPeek();
+      }
+    });
+
+    const releasePointer = (event: PointerEvent): void => {
+      pointers.delete(event.pointerId);
+      lastPinchDistance = 0;
+    };
+    window.addEventListener("pointerup", releasePointer);
+    window.addEventListener("pointercancel", releasePointer);
   }
 
   private bindDifficultyPicker(): void {
@@ -742,7 +816,6 @@ export class MouseRace3D {
     this.must<HTMLButtonElement>("ptest-right").addEventListener("click", () => this.stepMove("right"));
     this.must<HTMLButtonElement>("ptest-crumb").addEventListener("click", () => this.warpToPickup("crumb"));
     this.must<HTMLButtonElement>("ptest-green-crumb").addEventListener("click", () => this.warpToPickup("greenCrumb"));
-    this.must<HTMLButtonElement>("ptest-gem").addEventListener("click", () => this.warpToPickup("gem"));
     this.must<HTMLButtonElement>("ptest-trap").addEventListener("click", () => this.warpToHazard("trap"));
     this.must<HTMLButtonElement>("ptest-cheese").addEventListener("click", () => this.warpToCheese());
     this.must<HTMLButtonElement>("ptest-cat").addEventListener("click", () => this.warpToCat());
@@ -1322,10 +1395,9 @@ export class MouseRace3D {
         }
 
         if (cell === "G") {
-          const gem = this.buildGem(level.theme.accent);
-          gem.position.set(x, 0.6, z);
-          group.add(gem);
-          gems.push({ mesh: gem, position: gem.position.clone(), active: true });
+          // Teleportation gems removed after playtest feedback — kids found
+          // being warped around disorienting. Gem cells are plain floor now;
+          // mouse-hole tunnels ("H") remain the themed way to shortcut.
           return;
         }
 
@@ -1863,6 +1935,18 @@ export class MouseRace3D {
     snout.position.set(0, 0.16, -0.74);
     group.add(snout);
 
+    // Collar with a little golden bell (it jingles as the cat walks).
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.045, 8, 20), new THREE.MeshStandardMaterial({ color: 0xd23a4a, roughness: 0.6 }));
+    collar.rotation.x = Math.PI / 2 + 0.35;
+    collar.position.set(0, 0.08, -0.58);
+    group.add(collar);
+    const bell = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0xffd23e, metalness: 0.7, roughness: 0.25, emissive: 0x8a6a10, emissiveIntensity: 0.35 }),
+    );
+    bell.position.set(0, -0.04, -0.72);
+    group.add(bell);
+
     const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), noseMat);
     nose.position.set(0, 0.22, -0.82);
     group.add(nose);
@@ -2061,6 +2145,29 @@ export class MouseRace3D {
       group.add(hole);
     }
 
+    // Playtest feedback: the block read as plain scenery. Four chunky
+    // arrows on the top face point out the four push directions.
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xff7a1f, side: THREE.DoubleSide });
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(-0.09, -0.16);
+    arrowShape.lineTo(0.09, -0.16);
+    arrowShape.lineTo(0.09, 0.0);
+    arrowShape.lineTo(0.19, 0.0);
+    arrowShape.lineTo(0, 0.2);
+    arrowShape.lineTo(-0.19, 0.0);
+    arrowShape.lineTo(-0.09, 0.0);
+    arrowShape.closePath();
+    const arrowGeom = new THREE.ShapeGeometry(arrowShape);
+    for (let d = 0; d < 4; d += 1) {
+      const holder = new THREE.Group();
+      holder.rotation.y = (d * Math.PI) / 2;
+      const arrow = new THREE.Mesh(arrowGeom, arrowMat);
+      arrow.rotation.x = -Math.PI / 2;
+      arrow.position.set(0, 0.575, -0.48);
+      holder.add(arrow);
+      group.add(holder);
+    }
+
     group.add(this.createWorldMarker("PUSH", 0xfff3a1, 0x7f4a00, 1.15));
     return group;
   }
@@ -2104,80 +2211,6 @@ export class MouseRace3D {
     }
 
     group.add(this.createWorldMarker("BITE", 0xffefbf, level.theme.trim, wallHeight * 0.62));
-    return group;
-  }
-
-  private buildGem(accentColor: number): THREE.Group {
-    const group = new THREE.Group();
-
-    const hull = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.42, 0),
-      new THREE.MeshStandardMaterial({
-        color: accentColor,
-        emissive: accentColor,
-        emissiveIntensity: 0.55,
-        roughness: 0.06,
-        metalness: 0.55,
-        transparent: true,
-        opacity: 0.78,
-        flatShading: true,
-      }),
-    );
-    hull.scale.set(0.78, 1.45, 0.78);
-    hull.castShadow = true;
-    group.add(hull);
-
-    const facetEdges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(hull.geometry),
-      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }),
-    );
-    facetEdges.scale.copy(hull.scale);
-    group.add(facetEdges);
-
-    const core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.16, 0),
-      new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    );
-    core.scale.set(0.95, 1.35, 0.95);
-    group.add(core);
-
-    const orbit = new THREE.Mesh(
-      new THREE.TorusGeometry(0.46, 0.022, 8, 36),
-      new THREE.MeshBasicMaterial({
-        color: accentColor,
-        transparent: true,
-        opacity: 0.7,
-      }),
-    );
-    orbit.rotation.x = Math.PI / 2.4;
-    group.add(orbit);
-
-    const orbit2 = new THREE.Mesh(
-      new THREE.TorusGeometry(0.5, 0.014, 8, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.45,
-      }),
-    );
-    orbit2.rotation.x = Math.PI / 1.8;
-    orbit2.rotation.z = Math.PI / 6;
-    group.add(orbit2);
-
-    const halo = new THREE.Mesh(
-      new THREE.RingGeometry(0.24, 0.95, 36),
-      new THREE.MeshBasicMaterial({
-        color: accentColor,
-        transparent: true,
-        opacity: 0.32,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
-    halo.rotation.x = -Math.PI / 2;
-    halo.position.y = -0.55;
-    group.add(halo);
-
     return group;
   }
 
@@ -3939,6 +3972,17 @@ export class MouseRace3D {
     vector.normalize().multiplyScalar((this.getCatSpeed(LEVELS[this.levelIndex]) / 24) * speedScale * delta);
     this.catStridePhase += vector.length() * 9;
     this.catStrideAmp = Math.min(1, this.catStrideAmp + delta * 8);
+    // Collar bell jingles as the cat walks — louder the closer it prowls,
+    // so kids can hear danger coming around corners.
+    this.catBellAccum += vector.length();
+    if (this.catBellAccum > 0.9) {
+      this.catBellAccum = 0;
+      const earshot = 14;
+      if (playerDistance < earshot) {
+        const proximity = Math.pow(1 - playerDistance / earshot, 1.6);
+        this.audio.playCatBell(proximity * (shouldChase ? 1 : 0.65) + 0.05);
+      }
+    }
     this.moveWithCollisions(this.cat.position, CAT_RADIUS, vector);
     this.cat.rotation.y = Math.atan2(-vector.x, -vector.z);
     this.cat.rotation.z = Math.sin(now * 0.012) * (shouldChase ? 0.14 : 0.09);
@@ -4513,11 +4557,14 @@ export class MouseRace3D {
 
     this.scoutPeeks -= 1;
     this.scoutPeekUntil = performance.now() + SCOUT_PEEK_DURATION_MS;
+    this.scoutZoom = 1;
+    this.scoutPanX = 0;
+    this.scoutPanZ = 0;
     this.cameraInitialized = false;
     this.wasScoutPeekActive = true;
     this.currentSpeed = 0;
     this.targetSpeed = 0;
-    this.flashHint("🗺️ Scout view! The race is paused — spot the keys and cheese!");
+    this.flashHint("🗺️ Scout view! Drag to look around, pinch or scroll to zoom.");
     this.audio.playGem();
     this.refreshScoutButton();
   }
@@ -4547,18 +4594,26 @@ export class MouseRace3D {
     const limitingFov = Math.max(THREE.MathUtils.degToRad(24), Math.min(verticalFovRad, horizontalFovRad));
     const mazeRadius = Math.hypot(this.maze.mazeWidth, this.maze.mazeDepth) * 0.5;
     const focus = this.getScoutFocus();
-    const scoutDistance = THREE.MathUtils.clamp(
-      focus.radius / Math.sin(limitingFov / 2),
-      24,
-      mazeRadius * 3.2,
-    );
+    const scoutDistance =
+      THREE.MathUtils.clamp(
+        focus.radius / Math.sin(limitingFov / 2),
+        24,
+        mazeRadius * 3.2,
+      ) / this.scoutZoom;
+    this.lastScoutDistance = scoutDistance;
     const scoutDirection = new THREE.Vector3(0, 1, 0.01).normalize();
 
-    this.cameraTarget.copy(focus.center).addScaledVector(scoutDirection, scoutDistance);
+    // Pinch/drag offsets, clamped so the view can't wander off the maze.
+    this.scoutPanX = THREE.MathUtils.clamp(this.scoutPanX, -mazeRadius, mazeRadius);
+    this.scoutPanZ = THREE.MathUtils.clamp(this.scoutPanZ, -mazeRadius, mazeRadius);
+    const centerX = focus.center.x + this.scoutPanX;
+    const centerZ = focus.center.z + this.scoutPanZ;
+
+    this.cameraTarget.set(centerX, focus.center.y, centerZ).addScaledVector(scoutDirection, scoutDistance);
     this.camera.position.lerp(this.cameraTarget, this.cameraInitialized ? 0.18 : 1);
     this.cameraInitialized = true;
     this.camera.up.set(0, 0, -1);
-    this.camera.lookAt(focus.center.x, 0, focus.center.z);
+    this.camera.lookAt(centerX, 0, centerZ);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.14);
     this.camera.far = Math.max(600, scoutDistance + mazeRadius + 60);
     this.camera.updateProjectionMatrix();
@@ -4839,6 +4894,12 @@ export class MouseRace3D {
     // The start screen counts as an open overlay, so the sim freezes; the
     // next Start Race begins a fresh run via startRun(true).
     this.paused = false;
+    const pauseBtn = document.getElementById("pause-btn");
+    if (pauseBtn) {
+      pauseBtn.textContent = "⏸";
+      pauseBtn.setAttribute("aria-label", "Pause game");
+      pauseBtn.classList.remove("active");
+    }
     this.overlay.root.classList.add("hidden");
     this.hud.root.classList.add("hidden");
     this.hud.toast.classList.add("hidden");
@@ -4861,10 +4922,10 @@ export class MouseRace3D {
     this.overlay.button.textContent = buttonLabel;
     this.overlay.title.classList.toggle("celebrate", icon === "cheese");
     if (icon === "alice") {
-      this.overlay.icon.src = "/src/Images/file_00000000e9d0720b907b128f233c1f66.png";
+      this.overlay.icon.src = aliceImageUrl;
       this.overlay.icon.classList.remove("hidden");
     } else if (icon === "cheese") {
-      this.overlay.icon.src = "/src/Images/cheese_circular_crop.png";
+      this.overlay.icon.src = cheeseImageUrl;
       this.overlay.icon.classList.remove("hidden");
     } else {
       this.overlay.icon.classList.add("hidden");
@@ -4992,9 +5053,15 @@ export class MouseRace3D {
     if (!this.startScreen.classList.contains("hidden")) return;
     if (!this.overlay.root.classList.contains("hidden")) return;
     this.paused = !this.paused;
+    const pauseBtn = document.getElementById("pause-btn");
+    if (pauseBtn) {
+      pauseBtn.textContent = this.paused ? "▶" : "⏸";
+      pauseBtn.setAttribute("aria-label", this.paused ? "Resume game" : "Pause game");
+      pauseBtn.classList.toggle("active", this.paused);
+    }
     if (this.paused) {
       window.clearTimeout(this.currentHintTimeout);
-      this.hud.toast.textContent = "Paused — Esc to resume";
+      this.hud.toast.textContent = "⏸ Paused — tap ▶ or press Esc to keep racing";
       this.hud.toast.classList.remove("alert");
       this.hud.toast.classList.remove("hidden");
     } else {
