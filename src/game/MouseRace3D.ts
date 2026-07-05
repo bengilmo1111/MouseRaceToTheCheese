@@ -316,6 +316,11 @@ export class MouseRace3D {
   private catStridePhase = 0;
   private catStrideAmp = 0;
   private cheeseFx!: { ring: THREE.Mesh; beacon: THREE.Mesh };
+  private ambientFx?: {
+    points: THREE.Points;
+    mode: "dust" | "embers" | "fireflies" | "stars";
+    base: Float32Array;
+  };
   private cat!: THREE.Group;
   private cheese!: THREE.Group;
 
@@ -793,6 +798,7 @@ export class MouseRace3D {
     }
 
     this.maze = this.buildLevel(LEVELS[index]);
+    this.maze.levelGroup.add(this.buildAmbientParticles(LEVELS[index]));
     this.scene.add(this.maze.levelGroup);
 
     this.player.position.copy(this.maze.startPoint);
@@ -2618,6 +2624,253 @@ export class MouseRace3D {
     return [wallSide, wallSide, wallTop, wallSide, wallSide, wallSide];
   }
 
+  // Themed atmosphere floating above the maze: dust motes, embers,
+  // fireflies, or star sparkles. Lives in the level group so it's disposed
+  // with the level; one Points mesh, so it costs a single draw call.
+  private buildAmbientParticles(level: LevelDefinition): THREE.Points {
+    const mode: "dust" | "embers" | "fireflies" | "stars" =
+      level.theme.wallStyle === "stone"
+        ? "embers"
+        : level.theme.wallStyle === "bamboo"
+          ? "fireflies"
+          : level.theme.wallStyle === "metal"
+            ? "stars"
+            : "dust";
+
+    const count = 140;
+    const positions = new Float32Array(count * 3);
+    const spread = 26;
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3] = (Math.random() - 0.5) * 2 * spread;
+      positions[i * 3 + 1] = 0.4 + Math.random() * 6.5;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 2 * spread;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    const settings = {
+      dust: { color: 0xffe9b0, size: 0.1, opacity: 0.55, blending: THREE.NormalBlending },
+      embers: { color: 0xff9a4a, size: 0.13, opacity: 0.85, blending: THREE.AdditiveBlending },
+      fireflies: { color: 0xc8ff78, size: 0.15, opacity: 0.9, blending: THREE.AdditiveBlending },
+      stars: { color: 0xcfe8ff, size: 0.13, opacity: 0.9, blending: THREE.AdditiveBlending },
+    }[mode];
+    const material = new THREE.PointsMaterial({
+      color: settings.color,
+      size: settings.size,
+      transparent: true,
+      opacity: settings.opacity,
+      depthWrite: false,
+      blending: settings.blending,
+    });
+
+    const points = new THREE.Points(geometry, material);
+    this.ambientFx = { points, mode, base: positions.slice() };
+    return points;
+  }
+
+  private animateAmbientParticles(now: number): void {
+    if (!this.ambientFx || !this.ambientFx.points.parent) {
+      return;
+    }
+
+    const { points, mode, base } = this.ambientFx;
+    const attr = points.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const arr = attr.array as Float32Array;
+    const t = now * 0.001;
+    const count = arr.length / 3;
+    for (let i = 0; i < count; i += 1) {
+      const bx = base[i * 3];
+      const by = base[i * 3 + 1];
+      const bz = base[i * 3 + 2];
+      if (mode === "embers") {
+        // Embers rise and wrap back to the floor.
+        arr[i * 3 + 1] = 0.4 + ((by + t * (0.5 + (i % 5) * 0.14)) % 7);
+        arr[i * 3] = bx + Math.sin(t * 0.6 + i * 1.3) * 0.35;
+      } else {
+        arr[i * 3] = bx + Math.sin(t * 0.24 + i * 1.7) * 0.55;
+        arr[i * 3 + 1] = by + Math.sin(t * 0.5 + i) * 0.4;
+        arr[i * 3 + 2] = bz + Math.cos(t * 0.2 + i * 0.9) * 0.55;
+      }
+    }
+    attr.needsUpdate = true;
+
+    // Fireflies and stars twinkle; the whole cloud pulsing reads fine.
+    if (mode === "fireflies" || mode === "stars") {
+      (points.material as THREE.PointsMaterial).opacity = 0.55 + (Math.sin(t * 2.4) * 0.5 + 0.5) * 0.4;
+    }
+  }
+
+  // Painted once per theme onto a canvas and set as scene.background —
+  // renders as a static backdrop, so it costs nothing per frame.
+  private createSkyTexture(level: LevelDefinition): THREE.CanvasTexture {
+    const key = `sky-${level.theme.name}`;
+    const cached = this.textureCache.get(key);
+    if (cached) return cached;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // Horizon melts into the fog color so distant walls blend into the sky.
+    const fogHex = `#${level.theme.fog.toString(16).padStart(6, "0")}`;
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, level.theme.skyTop);
+    gradient.addColorStop(0.62, level.theme.skyBottom);
+    gradient.addColorStop(1, fogHex);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const style = level.theme.wallStyle;
+    if (style === "cardboard") {
+      // Cheerful sun with rays, top-right.
+      const sun = ctx.createRadialGradient(830, 92, 8, 830, 92, 120);
+      sun.addColorStop(0, "rgba(255, 240, 180, 0.95)");
+      sun.addColorStop(0.35, "rgba(255, 214, 110, 0.55)");
+      sun.addColorStop(1, "rgba(255, 214, 110, 0)");
+      ctx.fillStyle = sun;
+      ctx.fillRect(650, 0, 380, 300);
+      ctx.fillStyle = "rgba(255, 235, 160, 0.95)";
+      ctx.beginPath();
+      ctx.arc(830, 92, 42, 0, Math.PI * 2);
+      ctx.fill();
+      // Fluffy clouds.
+      ctx.fillStyle = "rgba(255, 252, 244, 0.82)";
+      for (const [cx, cy, s] of [[170, 120, 1.15], [430, 78, 0.85], [640, 190, 0.7], [90, 250, 0.8], [950, 240, 0.9]] as const) {
+        for (const [ox, oy, r] of [[-38, 6, 24], [0, -8, 32], [36, 4, 26], [8, 12, 28]] as const) {
+          ctx.beginPath();
+          ctx.arc(cx + ox * s, cy + oy * s, r * s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else if (style === "stone") {
+      // Big low moon with craters and drifting mist.
+      const glow = ctx.createRadialGradient(770, 120, 10, 770, 120, 170);
+      glow.addColorStop(0, "rgba(255, 216, 160, 0.85)");
+      glow.addColorStop(0.3, "rgba(255, 180, 110, 0.35)");
+      glow.addColorStop(1, "rgba(255, 180, 110, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(560, 0, 440, 340);
+      ctx.fillStyle = "#ffdcae";
+      ctx.beginPath();
+      ctx.arc(770, 120, 52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(196, 148, 96, 0.55)";
+      for (const [ox, oy, r] of [[-16, -10, 9], [14, 8, 12], [4, -22, 6], [-24, 18, 7]] as const) {
+        ctx.beginPath();
+        ctx.arc(770 + ox, 120 + oy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Sparse warm stars.
+      for (let i = 0; i < 60; i += 1) {
+        ctx.globalAlpha = 0.25 + Math.random() * 0.5;
+        ctx.fillStyle = "#ffd9a8";
+        const r = Math.random() > 0.85 ? 2 : 1;
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * 300, r, r);
+      }
+      ctx.globalAlpha = 1;
+      // Mist bands near the horizon.
+      for (let i = 0; i < 4; i += 1) {
+        const y = 330 + i * 40;
+        const mist = ctx.createLinearGradient(0, y - 16, 0, y + 16);
+        mist.addColorStop(0, "rgba(255, 160, 90, 0)");
+        mist.addColorStop(0.5, "rgba(255, 160, 90, 0.1)");
+        mist.addColorStop(1, "rgba(255, 160, 90, 0)");
+        ctx.fillStyle = mist;
+        ctx.fillRect(0, y - 16, canvas.width, 32);
+      }
+    } else if (style === "bamboo") {
+      // Sunbeams slanting through the canopy.
+      ctx.save();
+      for (let i = 0; i < 5; i += 1) {
+        const x = 120 + i * 190;
+        const beam = ctx.createLinearGradient(x, 0, x - 130, 512);
+        beam.addColorStop(0, "rgba(220, 255, 170, 0.32)");
+        beam.addColorStop(1, "rgba(220, 255, 170, 0)");
+        ctx.fillStyle = beam;
+        ctx.beginPath();
+        ctx.moveTo(x - 26, 0);
+        ctx.lineTo(x + 26, 0);
+        ctx.lineTo(x - 104, 512);
+        ctx.lineTo(x - 156, 512);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+      // Leafy canopy hanging over the top edge.
+      ctx.fillStyle = "rgba(10, 34, 14, 0.9)";
+      for (let x = -20; x < canvas.width + 20; x += 46) {
+        const drop = 34 + ((x * 7919) % 53);
+        ctx.beginPath();
+        ctx.ellipse(x, 8, 46, drop, 0, 0, Math.PI);
+        ctx.fill();
+      }
+      ctx.fillStyle = "rgba(60, 130, 52, 0.65)";
+      for (let x = 4; x < canvas.width; x += 62) {
+        const drop = 22 + ((x * 104729) % 34);
+        ctx.beginPath();
+        ctx.ellipse(x, 4, 34, drop, 0, 0, Math.PI);
+        ctx.fill();
+      }
+      // A couple of distant birds.
+      ctx.strokeStyle = "rgba(16, 42, 20, 0.8)";
+      ctx.lineWidth = 3;
+      for (const [bx, by, s] of [[300, 180, 1], [370, 150, 0.7], [700, 210, 0.85]] as const) {
+        ctx.beginPath();
+        ctx.arc(bx - 9 * s, by, 9 * s, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.arc(bx + 9 * s, by, 9 * s, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
+    } else if (style === "metal") {
+      // Starfield with nebulas and a ringed planet.
+      for (let i = 0; i < 260; i += 1) {
+        ctx.globalAlpha = 0.3 + Math.random() * 0.7;
+        ctx.fillStyle = Math.random() > 0.88 ? "#aee6ff" : "#ffffff";
+        const r = Math.random() > 0.92 ? 2.5 : Math.random() > 0.6 ? 1.5 : 1;
+        ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, r, r);
+      }
+      ctx.globalAlpha = 1;
+      for (const [nx, ny, nr, color] of [
+        [220, 150, 190, "138, 74, 226"],
+        [780, 320, 230, "44, 168, 220"],
+        [560, 80, 150, "220, 74, 160"],
+      ] as const) {
+        const nebula = ctx.createRadialGradient(nx, ny, 10, nx, ny, nr);
+        nebula.addColorStop(0, `rgba(${color}, 0.2)`);
+        nebula.addColorStop(1, `rgba(${color}, 0)`);
+        ctx.fillStyle = nebula;
+        ctx.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
+      }
+      // Ringed planet.
+      ctx.save();
+      ctx.translate(180, 130);
+      ctx.rotate(-0.28);
+      ctx.fillStyle = "#e8b45e";
+      ctx.beginPath();
+      ctx.arc(0, 0, 38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(196, 128, 60, 0.6)";
+      ctx.beginPath();
+      ctx.ellipse(0, -10, 30, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 226, 170, 0.85)";
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 66, 18, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    this.textureCache.set(key, texture);
+    return texture;
+  }
+
   private createCardboardTexture(kind: "floor" | "side" | "top"): THREE.CanvasTexture {
     const cached = this.textureCache.get(`cardboard-${kind}`);
     if (cached) return cached;
@@ -2688,13 +2941,13 @@ export class MouseRace3D {
       const brickH = 32, brickW = 64;
       for (let row = 0; row < 256 / brickH; row++) {
         const offset = (row % 2) * (brickW / 2);
-        ctx.globalAlpha = 0.12;
+        ctx.globalAlpha = 0.34;
         ctx.fillStyle = "#1a120c";
-        ctx.fillRect(0, row * brickH, 256, 2);
+        ctx.fillRect(0, row * brickH, 256, 3);
         for (let col = -1; col < 256 / brickW + 1; col++) {
-          ctx.fillRect(col * brickW + offset, row * brickH, 2, brickH);
+          ctx.fillRect(col * brickW + offset, row * brickH, 3, brickH);
         }
-        ctx.globalAlpha = 0.07;
+        ctx.globalAlpha = 0.13;
         ctx.fillStyle = "#6a5040";
         ctx.fillRect(0, row * brickH + 4, 256, brickH - 8);
       }
@@ -2765,15 +3018,18 @@ export class MouseRace3D {
       }
     }
     if (kind === "floor") {
-      ctx.globalAlpha = 0.22;
-      for (let i = 0; i < 60; i++) {
+      ctx.globalAlpha = 0.35;
+      for (let i = 0; i < 90; i++) {
         const lx = Math.random() * 256, ly = Math.random() * 256;
-        const lw = 6 + Math.random() * 20, lh = 3 + Math.random() * 8;
-        ctx.fillStyle = Math.random() > 0.5 ? "#3a6020" : "#0e1a08";
+        const lw = 8 + Math.random() * 24, lh = 4 + Math.random() * 9;
+        ctx.fillStyle = Math.random() > 0.5 ? "#4a7828" : "#0e1a08";
         ctx.save();
         ctx.translate(lx, ly);
         ctx.rotate(Math.random() * Math.PI);
-        ctx.fillRect(-lw / 2, -lh / 2, lw, lh);
+        // Leaf litter: rounded ellipses read better than bare rectangles.
+        ctx.beginPath();
+        ctx.ellipse(0, 0, lw / 2, lh / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
       }
     }
@@ -3177,6 +3433,7 @@ export class MouseRace3D {
     this.animateMouse(now, delta);
     this.animateCat(now, delta);
     this.animateCheese(now);
+    this.animateAmbientParticles(now);
     this.updatePlayerLight();
     this.playtestTick += 1;
     if (this.playtestTick % 5 === 0) {
@@ -4758,7 +5015,7 @@ export class MouseRace3D {
   private updateTheme(level: LevelDefinition): void {
     this.host.style.background = `linear-gradient(180deg, ${level.theme.skyTop} 0%, ${level.theme.skyBottom} 100%)`;
     (this.scene.fog as THREE.Fog).color.set(level.theme.fog);
-    this.scene.background = new THREE.Color(level.theme.skyBottom);
+    this.scene.background = this.createSkyTexture(level);
     this.renderer.toneMappingExposure = level.theme.exposure ?? 1.05;
 
     const lighting = level.theme.lighting;
